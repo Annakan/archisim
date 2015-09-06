@@ -45,13 +45,16 @@ Vagrant.configure(2) do |config|
   # when we update the linux images
 
   #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
-  $fix_vmware_tools_script = <<-SCRIPT
+ # Ensure that VMWare Tools recompiles kernel modules when we update the linux images
+  $fix_vmware_tools_script = <<SCRIPT
   sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations
-  sed -i 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
+  sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
   SCRIPT
-  config.vm.provision "shell", inline: $fix_vmware_tools_script
 
-
+  Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # ...
+    config.vm.provision :shell, :inline => $fix_vmware_tools_script
+  end
   # Provider-specific configuration so you can fine-tune various
   # backing providers for Vagrant. These expose provider-specific options.
   # Example for VirtualBox:
