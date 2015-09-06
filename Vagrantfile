@@ -78,6 +78,10 @@ Vagrant.configure(2) do |config|
   # SHELL
   config.vm.provision "shell", inline: <<-SHELL
     apt-get update
+    apt-get install language-pack-fr
+    apt-get -y install python-software-properties
+    add-apt-repository ppa:ubuntu-lxc/lxd-stable
+    apt-get update
     apt-get upgrade -y
     apt-get install -y lxd
     apt-get install -y python-sh python-yaml python-jinja2
