@@ -12,7 +12,8 @@ Vagrant.configure(2) do |config|
 
   # Every Vagrant development environment requires a box. You can search for
   # boxes at https://atlas.hashicorp.com/search.
-  config.vm.box = "ubuntu/vivid64"
+  #config.vm.box = "ubuntu/vivid64"
+  config.vm.box = "ffuenf/ubuntu-15.04-server-amd64"
 
   # Disable automatic box update checking. If you disable this, then
   # boxes will only be checked for updates when the user runs
@@ -39,6 +40,18 @@ Vagrant.configure(2) do |config|
   # argument is a set of non-required options.
   # config.vm.synced_folder "../data", "/vagrant_data"
 
+
+  # Ensure that VMWare Tools recompiles kernel modules
+  # when we update the linux images
+
+  #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
+  $fix_vmware_tools_script = <<-SCRIPT
+  sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations
+  sed -i 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
+  SCRIPT
+  config.vm.provision "shell", inline: $fix_vmware_tools_script
+
+
   # Provider-specific configuration so you can fine-tune various
   # backing providers for Vagrant. These expose provider-specific options.
   # Example for VirtualBox:
@@ -58,6 +71,14 @@ Vagrant.configure(2) do |config|
     vb.memory = "2048"
     vb.cpus = 2
   end
+  config.vm.provider "vmware" do |vmw|
+    # Display the VirtualBox GUI when booting the machine
+    #vmw.gui = true
+
+    # Customize the amount of memory on the VM:
+    vmw.memory = "2048"
+    vmw.cpus = 2
+  end
   #
   # View the documentation for the provider you are using for more
   # information on available options.
@@ -69,6 +90,7 @@ Vagrant.configure(2) do |config|
   #   push.app = "YOUR_ATLAS_USERNAME/YOUR_APPLICATION_NAME"
   # end
 
+
   # Enable provisioning with a shell script. Additional provisioners such as
   # Puppet, Chef, Ansible, Salt, and Docker are also available. Please see the
   # documentation for more information about their specific syntax and use.
@@ -79,6 +101,7 @@ Vagrant.configure(2) do |config|
   config.vm.provision "shell", inline: <<-SHELL
     apt-get update
     apt-get install language-pack-fr
+    apt-get install flip
     apt-get -y install python-software-properties
     add-apt-repository ppa:ubuntu-lxc/lxd-stable
     apt-get update
@@ -96,13 +119,16 @@ Vagrant.configure(2) do |config|
 
     apt-get autoremove -y
 
+    #make sure whatever the git checkout the file is in unix endings
+    su -c 'cd /vagrant/archisim && flip -u *' vagrant
+
     su -c 'ssh-keygen -t ecdsa -N "" -f /home/vagrant/.ssh/id_ecdsa' vagrant
     sleep 10
 
     su -c 'lxc remote add images images.linuxcontainers.org' vagrant
-    lxc config profile create twoNets
-    lxc config profile device add twoNets eth0 nic parent=lxcbr0 nictype=bridged
-    lxc config profile device add twoNets eth1 nic parent=lxcbr0 nictype=bridged
+    lxc profile create twoNets
+    lxc profile device add twoNets eth0 nic parent=lxcbr0 nictype=bridged
+    lxc profile device add twoNets eth1 nic parent=lxcbr0 nictype=bridged
 
     #Fake private network
     route add -net 192.168.99.0 netmask 255.255.255.0 lxcbr0
