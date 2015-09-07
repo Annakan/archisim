@@ -104,6 +104,8 @@ Vagrant.configure(2) do |config|
   config.vm.provision "shell", inline: <<-SHELL
     # fix stdin: is not a tty
     sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /root/.profile
+    sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /home/vagrant/.profile
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install language-pack-fr
     apt-get install flip
