@@ -46,12 +46,12 @@ Vagrant.configure(2) do |config|
 
   #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
  # Ensure that VMWare Tools recompiles kernel modules when we update the linux images
-  $fix_vmware_tools_script = <<SCRIPT
+  $fix_vmware_tools_script = <<-SCRIPT
   sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations
   sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
   SCRIPT
 
-  Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  Vagrant.configure(2) do |config|
   # ...
     config.vm.provision :shell, :inline => $fix_vmware_tools_script
   end
@@ -74,7 +74,7 @@ Vagrant.configure(2) do |config|
     vb.memory = "2048"
     vb.cpus = 2
   end
-  config.vm.provider "vmware" do |vmw|
+  config.vm.provider "vmware_workstation" do |vmw|
     # Display the VirtualBox GUI when booting the machine
     #vmw.gui = true
 
@@ -102,6 +102,8 @@ Vagrant.configure(2) do |config|
   #   sudo apt-get install -y apache2
   # SHELL
   config.vm.provision "shell", inline: <<-SHELL
+    # fix stdin: is not a tty
+    sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /root/.profile
     apt-get update
     apt-get install language-pack-fr
     apt-get install flip
