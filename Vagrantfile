@@ -13,7 +13,7 @@ Vagrant.configure(2) do |config|
   # Every Vagrant development environment requires a box. You can search for
   # boxes at https://atlas.hashicorp.com/search.
   #config.vm.box = "ubuntu/vivid64"
-  config.vm.box = "ffuenf/ubuntu-15.04-server-amd64"
+   config.vm.box = "boxcutter/ubuntu1504"
 
   # Disable automatic box update checking. If you disable this, then
   # boxes will only be checked for updates when the user runs
@@ -40,21 +40,6 @@ Vagrant.configure(2) do |config|
   # argument is a set of non-required options.
   # config.vm.synced_folder "../data", "/vagrant_data"
 
-
-  # Ensure that VMWare Tools recompiles kernel modules
-  # when we update the linux images
-
-  #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
- # Ensure that VMWare Tools recompiles kernel modules when we update the linux images
-  $fix_vmware_tools_script = <<-SCRIPT
-  sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations
-  sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
-  SCRIPT
-
-  Vagrant.configure(2) do |config|
-  # ...
-    config.vm.provision :shell, :inline => $fix_vmware_tools_script
-  end
   # Provider-specific configuration so you can fine-tune various
   # backing providers for Vagrant. These expose provider-specific options.
   # Example for VirtualBox:
@@ -101,6 +86,27 @@ Vagrant.configure(2) do |config|
   #   sudo apt-get update
   #   sudo apt-get install -y apache2
   # SHELL
+
+  #  suppress not a stdin messages
+  config.vm.provision "shell", inline: <<-SHELL
+    # fix stdin: is not a tty
+    sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /root/.profile
+    sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /home/vagrant/.profile
+    export DEBIAN_FRONTEND=noninteractive
+  SHELL
+  # Ensure that VMWare Tools recompiles kernel modules
+  # when we update the linux images
+
+  #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
+  # Ensure that VMWare Tools recompiles kernel modules when we update the linux images
+  $fix_vmware_tools_script = <<-SCRIPT
+  sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations
+  sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
+  SCRIPT
+  config.vm.provision :shell, :inline => $fix_vmware_tools_script
+
+  # Configuration of LXD
+
   config.vm.provision "shell", inline: <<-SHELL
     # fix stdin: is not a tty
     sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /root/.profile
@@ -109,7 +115,7 @@ Vagrant.configure(2) do |config|
     apt-get update
     apt-get install language-pack-fr
     apt-get install flip
-    apt-get -y install python-software-properties
+    apt-get -y install software-properties-common python-software-properties
     add-apt-repository ppa:ubuntu-lxc/lxd-stable
     apt-get update
     apt-get upgrade -y
@@ -117,6 +123,7 @@ Vagrant.configure(2) do |config|
     apt-get install -y python-sh python-yaml python-jinja2
     service lxd start
     adduser vagrant lxd
+    echo "root:1000000:65536" | sudo tee -a /etc/subuid /etc/subgid
     #
     # Chef is just boring
     apt-get remove --purge -y chef
@@ -127,7 +134,7 @@ Vagrant.configure(2) do |config|
     apt-get autoremove -y
 
     #make sure whatever the git checkout the file is in unix endings
-    su -c 'cd /vagrant/archisim && flip -u *' vagrant
+    su -c 'cd /vagrant/lxdvm && flip -u *' vagrant
 
     su -c 'ssh-keygen -t ecdsa -N "" -f /home/vagrant/.ssh/id_ecdsa' vagrant
     sleep 10
