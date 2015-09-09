@@ -115,13 +115,19 @@ Vagrant.configure(2) do |config|
     apt-get update
     apt-get install language-pack-fr
     apt-get install flip
-    apt-get -y install software-properties-common python-software-properties
+    apt-get -y install python-dev software-properties-common python-software-properties libyaml-dev
     add-apt-repository ppa:ubuntu-lxc/lxd-stable
     apt-get update
     apt-get upgrade -y
     apt-get install -y lxd
-    apt-get install -y python-sh python-yaml python-jinja2
+    # apt-get install -y python-sh python-yaml python-jinja2
     service lxd start
+    python get-pip.py --force-reinstall  --install-option="--install-scripts=/usr/bin"
+    pip install virtualenv
+    pip install sh
+    pip install jinja2
+    pip install pyaml
+    pip install argparse
     adduser vagrant lxd
     echo "root:1000000:65536" | sudo tee -a /etc/subuid /etc/subgid
     #
