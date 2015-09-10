@@ -122,6 +122,7 @@ Vagrant.configure(2) do |config|
     apt-get install -y lxd
     # apt-get install -y python-sh python-yaml python-jinja2
     service lxd start
+    wget https://bootstrap.pypa.io/get-pip.py
     python get-pip.py --force-reinstall  --install-option="--install-scripts=/usr/bin"
     pip install virtualenv
     pip install sh
