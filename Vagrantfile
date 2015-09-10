@@ -115,7 +115,7 @@ Vagrant.configure(2) do |config|
     apt-get update
     apt-get install language-pack-fr
     apt-get install flip
-    apt-get -y install python-dev software-properties-common python-software-properties libyaml-dev
+    apt-get -y install python-dev software-properties-common python-software-properties libyaml-dev unzip
     add-apt-repository ppa:ubuntu-lxc/lxd-stable
     apt-get update
     apt-get upgrade -y
