@@ -1,74 +1,88 @@
-#!/bin/sh
+#!/bin/bash
 #
-# consul - this script manages the consul agent
+# from https://gist.github.com/hehachris/e263435a1324cf4e1643
+
+# consul        Manage the consul agent
 #
-# chkconfig:   345 95 05
+# chkconfig:   2345 95 95
+# description: Consul is a tool for service discovery and configuration
 # processname: consul
+# config: /etc/consul.conf
+# pidfile: /var/run/consul.pid
 
 ### BEGIN INIT INFO
 # Provides:       consul
 # Required-Start: $local_fs $network
-# Required-Stop:  $local_fs $network
-# Default-Start: 3 4 5
-# Default-Stop:  0 1 2 6
+# Required-Stop:
+# Should-Start:
+# Should-Stop:
+# Default-Start: 2 3 4 5
+# Default-Stop:  0 1 6
 # Short-Description: Manage the consul agent
+# Description: Consul is a tool for service discovery and configuration
 ### END INIT INFO
 
-# Source function library.
+# source function library
 . /etc/rc.d/init.d/functions
 
-# Source networking configuration.
-. /etc/sysconfig/network
-
-# Check that networking is up.
-[ "$NETWORKING" = "no" ] && exit 0
-
-
-$CONSULPATH="/root/consul/"
-exec="$CONSULPATH/consul"
-prog=${exec##*/}
-
+prog="consul"
+user="root"
+exec="/usr/local/bin/$prog"
+pidfile="/var/run/$prog.pid"
 lockfile="/var/lock/subsys/$prog"
-pidfile="/var/run/${prog}.pid"
-logfile="/var/log/${prog}.log"
-sysconfig="/etc/sysconfig/$prog"
-confdir="/etc/${prog}.d"
+logfile="/var/log/$prog.log"
+conffile="/etc/consul.conf"
+confdir="/etc/consul.d"
 
-[ -f $sysconfig ] && . $sysconfig
+# pull in sysconfig settings
+[ -e /etc/sysconfig/$prog ] && . /etc/sysconfig/$prog
 
 export GOMAXPROCS=${GOMAXPROCS:-2}
 
 start() {
     [ -x $exec ] || exit 5
+
+    [ -f $conffile ] || exit 6
     [ -d $confdir ] || exit 6
 
-    echo -n $"Starting $prog: "
+    umask 077
+
     touch $logfile $pidfile
-    daemon "{ $exec agent $OPTIONS -config-dir=$confdir &>> $logfile & }; echo \$! >| $pidfile"
+    chown $user:$user $logfile $pidfile
+
+    echo -n $"Starting $prog: "
+
+    ## holy shell shenanigans, batman!
+    ## daemon can't be backgrounded.  we need the pid of the spawned process,
+    ## which is actually done via runuser thanks to --user.  you can't do "cmd
+    ## &; action" but you can do "{cmd &}; action".
+    daemon \
+        --pidfile=$pidfile \
+        --user=$user \
+        " { $exec agent -config-file=$conffile -config-dir=$confdir $1 &>> $logfile & } ; echo \$! >| $pidfile "
 
     RETVAL=$?
-    [ $RETVAL -eq 0 ] && touch $lockfile
     echo
+
+    [ $RETVAL -eq 0 ] && touch $lockfile
+
+    sleep 2
     return $RETVAL
 }
 
 stop() {
-    echo -n $"Stopping $prog: "
-    killproc -p $pidfile $exec -INT 2>> $logfile
+    echo -n $"Shutting down $prog: "
+    ## graceful shutdown with SIGINT
+    killproc -p $pidfile $exec -INT
     RETVAL=$?
-    [ $RETVAL -eq 0 ] && rm -f $pidfile $lockfile
     echo
+    [ $RETVAL -eq 0 ] && rm -f $lockfile
     return $RETVAL
 }
 
 restart() {
     stop
-    while :
-    do
-        ss -pl | fgrep "((\"$prog\"," > /dev/null
-        [ $? -ne 0 ] && break
-        sleep 0.1
-    done
+    sleep 2
     start
 }
 
@@ -82,12 +96,8 @@ force_reload() {
     restart
 }
 
-configtest() {
-    $exec configtest -config-dir=$confdir
-}
-
 rh_status() {
-    status $prog
+    status -p "$pidfile" -l $prog $exec
 }
 
 rh_status_q() {
@@ -95,6 +105,10 @@ rh_status_q() {
 }
 
 case "$1" in
+    bootstrap)
+        rh_status_q && exit 0
+        start -bootstrap
+        ;;
     start)
         rh_status_q && exit 0
         $1
@@ -106,22 +120,22 @@ case "$1" in
     restart)
         $1
         ;;
-    reload|force-reload)
+    reload)
         rh_status_q || exit 7
         $1
+        ;;
+    force-reload)
+        force_reload
         ;;
     status)
         rh_status
         ;;
     condrestart|try-restart)
-        rh_status_q || exit 7
+        rh_status_q || exit 0
         restart
         ;;
-    configtest)
-        $1
-        ;;
     *)
-        echo $"Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload|configtest}"
+        echo $"Usage: $0 {bootstrap|start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
         exit 2
 esac
 
