@@ -100,10 +100,10 @@ Vagrant.configure(2) do |config|
   #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
   # Ensure that VMWare Tools recompiles kernel modules when we update the linux images
   $fix_vmware_tools_script = <<-SCRIPT
-  sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations
-  sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations
+  su -c sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations ; true
+  su -c sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations ; true
   SCRIPT
-  config.vm.provision :shell, :inline => $fix_vmware_tools_script
+  config.vm.provision :shell, :inline =>  $fix_vmware_tools_script; 
 
   # Configuration of LXD
 
