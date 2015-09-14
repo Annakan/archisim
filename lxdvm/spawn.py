@@ -20,17 +20,22 @@ UID = GUID = 10000
 PRIVATE_NETWORK = "192.168.0.0"
 
 parser = argparse.ArgumentParser(description='Create LXD VM and register them dynamically')
-parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')
+parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')  # Done
 parser.add_argument('--rebuild_all', dest='rebuild_all',  help="Force the rebuilding of ALL vm",
-                    action='store_true', default=True)
-parser.add_argument('--keep_existing', dest='rebuild_all', action='store_false')
+                    action='store_true', default=True)  # Done
+parser.add_argument('--keep_existing', dest='rebuild_all', action='store_false') # Done
 parser.add_argument("--private_network", help="IP address of the private network", default=PRIVATE_NETWORK)
 
+consul_group = parser.add_mutually_exclusive_group('Consul Params', "Parameters for Consul management")
+consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
+# @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
+consul_group.add_argument('--install_consul_server', help="install Consul as server with the node addresses supplied",
+                          nargs='+')
 
 os_group = parser.add_argument_group("OS params", "parameters for OS type, versions and architecture")
-os_group.add_argument("--os", help="OS version", default='centos')
-os_group.add_argument("--release", help="OS release", default='7')
-os_group.add_argument("--arch", help="OS architecture",  default='amd64')
+os_group.add_argument("--os", help="OS version", default='centos')  # Done
+os_group.add_argument("--release", help="OS release", default='7')  # Done
+os_group.add_argument("--arch", help="OS architecture",  default='amd64')  # Done
 
 salt_group = parser.add_argument_group("salt params", "parameters for salt configuration of VMs")
 salt_group.add_argument("--salty", help="Make it a salt minion for the given master")
@@ -51,8 +56,6 @@ def list_vm():
             for line in blob]
     result = dict([(c[0], ConInfo(*(tuple(c)+(c[2].split(',')[0], c[3].split(',')[0])))) for c in blob])
     return result
-
-vms = list_vm()
 
 
 def remove_grains(vm):
@@ -96,6 +99,10 @@ def wait_for_vms(vmnames, maxwait=30*1000):
 if __name__ == "__main__":
 
     args = parser.parse_args()
+    arch = 'amd64' if args.arch in ['amd64', 'x64'] else 'i386'
+    install_consul = args.install_consul or args.install_consul_server
+    
+    vms = list_vm()
 
     for vm in args.vm_names:
         #  If the container mentionned in args already exist we destroy it first and later rebuild it in full
@@ -152,4 +159,3 @@ if __name__ == "__main__":
     tpl = jj_env.get_template('hosts.j2')
     tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
     sudo.mv('hosts.tmp', '/etc/hosts')
-
