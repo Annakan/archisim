@@ -85,6 +85,7 @@ def wait_for_vms(vmnames, maxwait=30*1000):
     for vmname in vmnames:
         vmlist = list_vm()
         while vmname not in vmlist and not vmlist[vmname].state == "running" and vmlist.mainIPV4:
+            print '.'
             vmlist = list_vm()
             time.sleep(1)
         if time.time()-start > maxwait:
@@ -97,7 +98,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     for vm in args.vm_names:
-        #  If the container mentionned in args already exist we destroy it first and later rebuilt it in full
+        #  If the container mentionned in args already exist we destroy it first and later rebuild it in full
         if vm in vms:
             print "cleaning [{}]".format(vm)
             remove_grains(vm)
@@ -105,10 +106,11 @@ if __name__ == "__main__":
         print "Instantiating core [{}]".format(vm)
         if os.path.exists('home/vagrant/.ssh/known_hosts'):
             ssh_keygen('-f', "/home/vagrant/.ssh/known_hosts", '-R', vm)
-        lxc.launch('images:debian/wheezy/amd64', vm, '-p', 'twoNets')
+        image_uri = "images:{os}/{release}/{arch}".format(**vars(args))
+        lxc.launch(image_uri, vm, '-p', 'twoNets')
         print "Done for core  [{}]".format(vm)
 
-    wait_for_vms(list_vm())
+    wait_for_vms(list_vm(), 10)
     print "waiting for network state stabilization for {} seconds".format(WAIT_NETWORK_STATE)
     time.sleep(WAIT_NETWORK_STATE)
     print "--"*25
@@ -121,32 +123,32 @@ if __name__ == "__main__":
 
     for vm, info in list_vm().items():
         if not args.rebuild_all and vm not in args.vm_names:
-            print "skipping configuration of VM [{}] because rebuild_all=False".format(vm)
-            continue
-        print "Configuring VM [{}] ({})".format(vm, info)
-        # 'id' is the final part of the assignated IP, we will build the private network IP based on it
-        # At that point of the (re-)creation process the containers have only one IP, the brdiged assigned one.
-        id = info.mainIPV4.split('.')[-1]  # Should we care for the 6 last digits to widen our availiable range of adresses?
-        #  preparing the VM network interfaces
-        tpl = jj_env.get_template('interfaces.j2')
-        tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
-        lxc.file.push('--uid=100000', '--gid=100000', 'interfaces.tmp',
-                      '%s/etc/network/interfaces' % vm)
-        #  Starting the newly added private interface
-        lxc('exec', vm, 'ifup', 'eth1')
-        #  bootstrap.sh contains code executed once to do some initializations, by default install the openSSH package.
-        lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
-        lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
-        #  and we push a default ssh key on the root of the VM
-        lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
-                      '%s/root/.ssh/authorized_keys' % vm)
+            print "skipping configuration of Container [{}] because rebuild_all=False".format(vm)
+        else:
+            print "Configuring VM [{}] ({})".format(vm, info)
+            # 'id' is the final part of the assignated IP, we will build the private network IP based on it
+            # At that point of the (re-)creation process the containers have only one IP, the brdiged assigned one.
+            id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of adresses?
+            #  preparing the VM network interfaces
+            tpl = jj_env.get_template('interfaces.j2')
+            tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
+            lxc.file.push('--uid=100000', '--gid=100000', 'interfaces.tmp',
+                          '%s/etc/network/interfaces' % vm)
+            #  Starting the newly added private interface
+            lxc('exec', vm, 'ifup', 'eth1')
+            #  bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
+            lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
+            lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
+            #  and we push a default ssh key on the root of the VM
+            lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
+                          '%s/root/.ssh/authorized_keys' % vm)
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         #  names.append(dict(ip=info[1], names=["%s.public.lan" % vm, vm]))
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
-        names.append(dict(ip="192.168.99.%s" % id,
-                          names=["%s.private.lan" % vm]))
+        names.append(dict(ip="192.168.99.%s" % id, names=["%s.private.lan" % vm]))
 
     # rewritting the /etc/hosts file on the HOST (where the lxd daemon sits)
+    # @TODO update hostfile and not full rewrite, we can share ;)
     tpl = jj_env.get_template('hosts.j2')
     tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
     sudo.mv('hosts.tmp', '/etc/hosts')
