@@ -101,7 +101,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     arch = 'amd64' if args.arch in ['amd64', 'x64'] else 'i386'
     install_consul = args.install_consul or args.install_consul_server
-    
+
     vms = list_vm()
 
     for vm in args.vm_names:
