@@ -21,10 +21,15 @@ PRIVATE_NETWORK = "192.168.0.0"
 
 parser = argparse.ArgumentParser(description='Create LXD VM and register them dynamically')
 parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')  # Done
-parser.add_argument('--rebuild_all', dest='rebuild_all',  help="Force the rebuilding of ALL vm",
-                    action='store_true', default=True)  # Done
-parser.add_argument('--keep_existing', dest='rebuild_all', action='store_false') # Done
 parser.add_argument("--private_network", help="IP address of the private network", default=PRIVATE_NETWORK)
+
+old_container_group = parser.add_mutually_exclusive_group('Container Preservation Params',
+                                                         "Parameters for container preservation")
+old_container_group.add_argument('--rebuild_all', dest='rebuild_all',  help="rebuild previous existing containers too",
+                                 action='store_true', default=True)  # Done
+old_container_group.add_argument('--keep_existing', dest='rebuild_all', action='store_false',
+                                 help="don't touch existing container not named in this command run")
+
 
 consul_group = parser.add_mutually_exclusive_group('Consul Params', "Parameters for Consul management")
 consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
