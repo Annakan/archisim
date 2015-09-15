@@ -19,36 +19,41 @@ TEMPLATE_DIR = ""
 UID = GUID = 10000
 PRIVATE_NETWORK = "192.168.0.0"
 
-parser = argparse.ArgumentParser(description='Create LXD VM and register them dynamically')
-parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')  # Done
-parser.add_argument("--private_network", help="IP address of the private network", default=PRIVATE_NETWORK)
 
-old_container_group = parser.add_mutually_exclusive_group('Container Preservation Params',
-                                                         "Parameters for container preservation")
-old_container_group.add_argument('--rebuild_all', dest='rebuild_all',  help="rebuild previous existing containers too",
-                                 action='store_true', default=True)  # Done
-old_container_group.add_argument('--keep_existing', dest='rebuild_all', action='store_false',
-                                 help="don't touch existing container not named in this command run")
+def make_arg_parser():
+
+    parser = argparse.ArgumentParser(description='Create LXD VM and register them dynamically')
+    parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')  # Done
+    parser.add_argument("--private_network", help="IP address of the private network", default=PRIVATE_NETWORK)
+
+    old_container_group = parser.add_mutually_exclusive_group('Container Preservation Params',
+                                                             "Parameters for container preservation")
+    old_container_group.add_argument('--rebuild_all', dest='rebuild_all',  help="rebuild previous existing containers too",
+                                     action='store_true', default=True)  # Done
+    old_container_group.add_argument('--keep_existing', dest='rebuild_all', action='store_false',
+                                     help="don't touch existing container not named in this command run")
 
 
-consul_group = parser.add_mutually_exclusive_group('Consul Params', "Parameters for Consul management")
-consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
-# @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
-consul_group.add_argument('--install_consul_server', help="install Consul as server with the node addresses supplied",
-                          nargs='+')
+    consul_group = parser.add_mutually_exclusive_group('Consul Params', "Parameters for Consul management")
+    consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
+    # @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
+    consul_group.add_argument('--install_consul_server', help="install Consul as server with the node addresses supplied",
+                              nargs='+')
 
-os_group = parser.add_argument_group("OS params", "parameters for OS type, versions and architecture")
-os_group.add_argument("--os", help="OS version", default='centos')  # Done
-os_group.add_argument("--release", help="OS release", default='7')  # Done
-os_group.add_argument("--arch", help="OS architecture",  default='amd64')  # Done
+    os_group = parser.add_argument_group("OS params", "parameters for OS type, versions and architecture")
+    os_group.add_argument("--os", help="OS version", default='centos')  # Done
+    os_group.add_argument("--release", help="OS release", default='7')  # Done
+    os_group.add_argument("--arch", help="OS architecture",  default='amd64')  # Done
 
-salt_group = parser.add_argument_group("salt params", "parameters for salt configuration of VMs")
-salt_group.add_argument("--salty", help="Make it a salt minion for the given master")
-salt_group.add_argument("--sal_id", help="salt id, if not present the machine hostname is used")
-salt_group.add_argument("--grain", help="register the given grain for that minion (require --salty)", action='append')
+    salt_group = parser.add_argument_group("salt params", "parameters for salt configuration of VMs")
+    salt_group.add_argument("--salty", help="Make it a salt minion for the given master")
+    salt_group.add_argument("--sal_id", help="salt id, if not present the machine hostname is used")
+    salt_group.add_argument("--grain", help="register the given grain for that minion (require --salty)", action='append')
 
-parser.add_argument("--template", help="use the given file template to get options, "
-                                       "command line arguments will override template values",  action='append')
+    parser.add_argument("--template", help="use the given file template to get options, "
+                                           "command line arguments will override template values",  action='append')
+
+    return parser
 
 
 def list_vm():
@@ -103,7 +108,7 @@ def wait_for_vms(vmnames, maxwait=30*1000):
 
 if __name__ == "__main__":
 
-    args = parser.parse_args()
+    args = make_arg_parser().parse_args()
     arch = 'amd64' if args.arch in ['amd64', 'x64'] else 'i386'
     install_consul = args.install_consul or args.install_consul_server
 
