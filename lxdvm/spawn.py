@@ -26,15 +26,13 @@ def make_arg_parser():
     parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')  # Done
     parser.add_argument("--private_network", help="IP address of the private network", default=PRIVATE_NETWORK)
 
-    old_container_group = parser.add_mutually_exclusive_group('Container Preservation Params',
-                                                             "Parameters for container preservation")
+    old_container_group = parser.add_mutually_exclusive_group()
     old_container_group.add_argument('--rebuild_all', dest='rebuild_all',  help="rebuild previous existing containers too",
                                      action='store_true', default=True)  # Done
     old_container_group.add_argument('--keep_existing', dest='rebuild_all', action='store_false',
                                      help="don't touch existing container not named in this command run")
 
-
-    consul_group = parser.add_mutually_exclusive_group('Consul Params', "Parameters for Consul management")
+    consul_group = parser.add_mutually_exclusive_group()
     consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
     # @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
     consul_group.add_argument('--install_consul_server', help="install Consul as server with the node addresses supplied",
