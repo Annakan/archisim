@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import sys
-from jinja2 import Environment, FileSystemLoader
+import jinja2
 from sh import lxc, sudo, ssh_keygen
 from sh import Command
 import time
 import os.path
 
 import argparse
+from tempfile import TemporaryFile, NamedTemporaryFile
 
 from collections import namedtuple
 
@@ -23,6 +24,8 @@ PRIVATE_NETWORK = "192.168.0.0"
 LOCALDIRNAME, SCRIPTNAME = os.path.split(os.path.abspath(sys.argv[0]))
 
 # dl_consul = Command(os.path.join(LOCALDIRNAME, 'dl_consul.sh'))
+
+jj_env = jinja2.Environment(loader=jinja2.FileSystemLoader('./templates'))
 
 def make_arg_parser():
 
@@ -110,6 +113,13 @@ def wait_for_vms(vmnames, maxwait=30*1000):
     return True
 
 
+def render_and_push(template, data, vm, target_file_name, ):
+    with NamedTemporaryFile() as tempfile:
+        tpl = jj_env.get_template(template)
+        tpl.stream(data).dump(tempfile)
+        lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_name))
+
+
 def decribe_os (os, release, arch):
     arch = 'amd64' if args.arch in ['amd64', 'x64'] else 'i386'
     os = os.lower()
@@ -162,8 +172,6 @@ if __name__ == "__main__":
     print list_vm()
     print "--"*100
 
-    jj_env = Environment(loader=FileSystemLoader('.'))
-
     names = []
 
     for vm, info in list_vm().items():
@@ -175,10 +183,11 @@ if __name__ == "__main__":
             # At that point of the (re-)creation process the containers have only one IP, the brdiged assigned one.
             id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of adresses?
             print "id [{}]".format(id)
-            print  "preparing the VM network interfaces"
-            tpl = jj_env.get_template('interfaces.j2')
-            tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
-            lxc.file.push('--uid=100000', '--gid=100000', 'interfaces.tmp', '%s/etc/network/interfaces' % vm)
+            print "preparing the VM network interfaces"
+            # tpl = jj_env.get_template('interfaces.j2')
+            # tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
+            # lxc.file.push('interfaces.tmp', '%s/etc/network/interfaces' % vm)
+            render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
             print "Starting the newly added private interface"
             lxc('exec', vm, 'ifup', 'eth1')
             #  bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
@@ -192,10 +201,17 @@ if __name__ == "__main__":
             # installing consul
             if install_consul:
                 print "installing consul"
-                # check consul is downloaded
+                # @todo check consul is downloaded
+                consul_params = {
+                    'consul_bin_path': '/root/consul',
+                    # 'consul_conf_dir': '',
+                    # 'env_file_path': '',
+                }
                 consul_bin = 'consul64' if arch =='amd64' else 'consul32'
                 consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
                 lxc.file.push(consul_bin_path, '%s/root/consul' % vm)
+                if init_sytem == "systemd":
+                    render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service.j2' )
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
