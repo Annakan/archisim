@@ -13,6 +13,8 @@ from tempfile import TemporaryFile, NamedTemporaryFile
 
 from collections import namedtuple
 
+CONSUL_BIN_PATH = '/root/consul'
+
 WAIT_NETWORK_STATE = 10
 
 ConInfo = namedtuple('ConInfo', ['name', 'state', 'IPV4s', 'IPV6s', 'ephemeral', 'snapshots', 'mainIPV4', 'mainIPV6'])
@@ -205,15 +207,17 @@ if __name__ == "__main__":
                 print "installing consul"
                 # @todo check consul is downloaded
                 consul_params = {
-                    'consul_bin_path': '/root/consul',
+                    'consul_bin_path': CONSUL_BIN_PATH,
                     # 'consul_conf_dir': '',
                     # 'env_file_path': '',
                 }
                 consul_bin = 'consul64' if arch =='amd64' else 'consul32'
                 consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
-                lxc.file.push(consul_bin_path, '%s/root/consul' % vm)
+                lxc.file.push(consul_bin_path, '{}/{}'.format(vm, CONSUL_BIN_PATH))
+                lxc('exec', vm, '/bin/sh', 'chmod +x %s' % CONSUL_BIN_PATH)
                 if init_sytem == "systemd":
                     render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service')
+                    lxc('exec', vm, '/bin/sh', 'systemctl start consul')
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
