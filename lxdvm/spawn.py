@@ -113,11 +113,13 @@ def wait_for_vms(vmnames, maxwait=30*1000):
     return True
 
 
-def render_and_push(template, data, vm, target_file_name, ):
-    with NamedTemporaryFile() as tempfile:
+def render_and_push(template, data, vm, target_file_name):
+    with NamedTemporaryFile(mode='w', delete=False) as tempfile:
         tpl = jj_env.get_template(template)
         tpl.stream(data).dump(tempfile)
+        tempfile.flush()
         lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_name))
+        os.remove(tempfile.name)
 
 
 def decribe_os (os, release, arch):
@@ -211,7 +213,7 @@ if __name__ == "__main__":
                 consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
                 lxc.file.push(consul_bin_path, '%s/root/consul' % vm)
                 if init_sytem == "systemd":
-                    render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service.j2' )
+                    render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service')
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
