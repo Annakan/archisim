@@ -179,45 +179,53 @@ if __name__ == "__main__":
     names = []
 
     for vm, info in list_vm().items():
-        if not args.rebuild_all and vm not in args.vm_names:
+        if not args.rebuild_all and vm not in args.vm_names :
             print "skipping configuration of Container [{}] because rebuild_all=False".format(vm)
         else:
-            print "Configuring VM [{}] ({})".format(vm, info)
-            # 'id' is the final part of the assignated IP, we will build the private network IP based on it
-            # At that point of the (re-)creation process the containers have only one IP, the brdiged assigned one.
-            id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of adresses?
-            print "id [{}]".format(id)
-            print "preparing the VM network interfaces"
-            # tpl = jj_env.get_template('interfaces.j2')
-            # tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
-            # lxc.file.push('interfaces.tmp', '%s/etc/network/interfaces' % vm)
-            render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
-            print "Starting the newly added private interface"
-            lxc('exec', vm, 'ifup', 'eth1')
-            #  bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
-            print "bootstrap"
-            lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
-            lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
-            #  and we push a default ssh key on the root of the VM
-            print "ssh auth installation"
-            lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
-                          '%s/root/.ssh/authorized_keys' % vm)
-            # installing consul
-            if install_consul:
-                print "installing consul"
-                # @todo check consul is downloaded
-                consul_params = {
-                    'consul_bin_path': CONSUL_BIN_PATH,
-                    # 'consul_conf_dir': '',
-                    # 'env_file_path': '',
-                }
-                consul_bin = 'consul64' if arch =='amd64' else 'consul32'
-                consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
-                lxc.file.push(consul_bin_path, '{}/{}'.format(vm, CONSUL_BIN_PATH))
-                lxc('exec', vm, '/bin/sh', 'chmod +x %s' % CONSUL_BIN_PATH)
-                if init_sytem == "systemd":
-                    render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service')
-                    lxc('exec', vm, '/bin/sh', 'systemctl start consul')
+            if info.state != 'RUNNING':
+                print "not Configuring VM [{}] ({}) because it is stopped and not in the list".format(vm, info)
+            else:
+                print "Configuring VM [{}] ({})".format(vm, info)
+                # 'id' is the final part of the assignated IP, we will build the private network IP based on it
+                # At that point of the (re-)creation process the containers have only one IP, the brdiged assigned one.
+                id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of adresses?
+                print "id [{}]".format(id)
+                print "preparing the VM network interfaces"
+                # tpl = jj_env.get_template('interfaces.j2')
+                # tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
+                # lxc.file.push('interfaces.tmp', '%s/etc/network/interfaces' % vm)
+                render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
+                print "Starting the newly added private interface"
+                lxc('exec', vm, 'ifup', 'eth1')
+                #  bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
+                print "bootstrap"
+                lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
+                lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
+                #  and we push a default ssh key on the root of the VM
+                print "ssh auth installation"
+                lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
+                              '%s/root/.ssh/authorized_keys' % vm)
+                # installing consul
+                if install_consul:
+                    print "installing consul"
+                    # @todo check consul is downloaded
+                    consul_params = {
+                        'consul_bin_path': CONSUL_BIN_PATH,
+                        'consul_conf_dir': '/etc/consul.d',
+                        # 'env_file_path': '',
+                        'data_dir': '/opt/data/consul',
+                    }
+                    consul_bin = 'consul64' if arch =='amd64' else 'consul32'
+                    consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
+                    lxc.file.push(consul_bin_path, '{}/{}'.format(vm, CONSUL_BIN_PATH))
+                    lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CONSUL_BIN_PATH)
+                    if init_sytem == "systemd":
+                        render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service')
+                        time.sleep(2)
+                        print "starting consul"
+                        lxc('exec', vm, '--', 'mkdir', '-p', consul_params['data_dir'])
+                        lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_conf_dir'])
+                        lxc('exec', vm, 'systemctl', 'start', 'consul')
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))

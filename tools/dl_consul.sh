@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-SCRIPTPATH=$( cd "$(dirname "$0")" ; pwd -P )
+SCRIPTPATH=$( cd "$(dirname "$0")"; pwd -P )
 echo $SCRIPTPATH
 mkdir -p $SCRIPTPATH/../consul
 pushd $SCRIPTPATH/../consul
