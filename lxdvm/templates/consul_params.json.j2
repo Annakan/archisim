@@ -1,0 +1,17 @@
+{
+  "domain": "consul.",
+  "data_dir": "{{ consul_data_dir }}",
+  "log_level": "INFO",
+  "node_name": {{ node_name }},
+  {% if server_mode %}
+    "server": true,
+    bootstrap-expect": {{ bootstrap_expect_value }},
+  {% else %}
+    "client": true,
+  {%endif  %}
+  "retry-join": "{{ join_list }}"
+  {% if bind_address is defined %} "bind_addr": "{{ bind_addr }}" {% endif %},
+  {% if retry-interval  is defined %} "retry-interval": "{{retry-interval}}" {% endif %},
+  "datacenter": "{{datacenter}}",
+  "rejoin_after_leave": true
+}

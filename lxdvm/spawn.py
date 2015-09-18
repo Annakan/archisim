@@ -9,21 +9,24 @@ import time
 import os.path
 
 import argparse
-from tempfile import TemporaryFile, NamedTemporaryFile
+from tempfile import NamedTemporaryFile
 
 from collections import namedtuple
 
-CONSUL_BIN_PATH = '/root/consul'
-
-WAIT_NETWORK_STATE = 10
-
 ConInfo = namedtuple('ConInfo', ['name', 'state', 'IPV4s', 'IPV6s', 'ephemeral', 'snapshots', 'mainIPV4', 'mainIPV6'])
 
-TEMPLATE_DIR = ""
+LOCALDIRNAME, SCRIPTNAME = os.path.split(os.path.abspath(sys.argv[0]))
+
+CON_TEMPLATE_DIR = ""
 UID = GUID = 10000
 PRIVATE_NETWORK = "192.168.0.0"
 
-LOCALDIRNAME, SCRIPTNAME = os.path.split(os.path.abspath(sys.argv[0]))
+CNR_CONSUL_PATH = '/opt/consul/'
+CNR_CONSUL_BINPATH = os.path.join(CNR_CONSUL_PATH, 'bin/consul')
+
+WAIT_NETWORK_STATE = 10
+
+
 
 # dl_consul = Command(os.path.join(LOCALDIRNAME, 'dl_consul.sh'))
 
@@ -44,8 +47,11 @@ def make_arg_parser():
     consul_group = parser.add_mutually_exclusive_group()
     consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
     # @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
-    consul_group.add_argument('--install_consul_server', nargs='+',
-                              help="install Consul as server with the node addresses supplied")
+    consul_group.add_argument('--install_consul_server',
+                              help="install Consul as server with the node addresses "
+                                   "supplied to join (can be zero for first server)")
+    consul_group.add_argument('--join_nodes', help="list of nodes to join as a server or client",
+                              nargs='*', default="127.0.0.1")
 
     os_group = parser.add_argument_group("OS params", "parameters for OS type, versions and architecture")
     os_group.add_argument("--os", help="OS version", default='centos')  # Done
@@ -115,12 +121,16 @@ def wait_for_vms(vmnames, maxwait=30*1000):
     return True
 
 
-def render_and_push(template, data, vm, target_file_name):
+def render_and_push(template, data, vm, target_file_path):
     with NamedTemporaryFile(mode='w', delete=False) as tempfile:
         tpl = jj_env.get_template(template)
         tpl.stream(data).dump(tempfile)
         tempfile.flush()
-        lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_name))
+        if target_file_path[:-1] == os.path.sep and os.path.splitext(template)[1] == '.j2':
+            target_file_path = os.path.join(target_file_path, os.path.splitext(template)[0])
+        else:
+            raise ValueError("can't determine the full target filename from {} and {}".format(template, target_file_path))
+        lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_path))
         os.remove(tempfile.name)
 
 
@@ -191,9 +201,6 @@ if __name__ == "__main__":
                 id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of adresses?
                 print "id [{}]".format(id)
                 print "preparing the VM network interfaces"
-                # tpl = jj_env.get_template('interfaces.j2')
-                # tpl.stream(id=id).dump(open('interfaces.tmp', 'w'))
-                # lxc.file.push('interfaces.tmp', '%s/etc/network/interfaces' % vm)
                 render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
                 print "Starting the newly added private interface"
                 lxc('exec', vm, 'ifup', 'eth1')
@@ -209,22 +216,37 @@ if __name__ == "__main__":
                 if install_consul:
                     print "installing consul"
                     # @todo check consul is downloaded
-                    consul_params = {
-                        'consul_bin_path': CONSUL_BIN_PATH,
-                        'consul_conf_dir': '/etc/consul.d',
-                        # 'env_file_path': '',
-                        'data_dir': '/opt/data/consul',
+                    consul_service_params = {
+                        'local_consul_bin_path': CNR_CONSUL_PATH,
+                        'consul_conf_dir': '/opt/consul/etc/',
+                        'consul_service_dir': '/opt/consul/etc/consul.d/',
                     }
+                    consul_params = {
+                        'node_name': vm.name,
+                        'datacenter': 'anssi',
+                        'bind': vm.mainIPV4,  # @todo better use the secondary network probably here
+                        'data_dir': '/opt/consul/data',
+                        'retry_join': args.join_nodes,
+                    }
+
+                    if args.install_consul_server:
+                        consul_params.update(
+                            {
+                             'server_mode': True,
+                             'bootstrap_expect_value': max(len(args.install_consul_server), 0),
+                            }
+                        )
                     consul_bin = 'consul64' if arch =='amd64' else 'consul32'
-                    consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
-                    lxc.file.push(consul_bin_path, '{}/{}'.format(vm, CONSUL_BIN_PATH))
-                    lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CONSUL_BIN_PATH)
+                    local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
+                    lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINPATH))
+                    lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINPATH)
                     if init_sytem == "systemd":
-                        render_and_push('consul.service.j2', consul_params, vm, '/etc/systemd/system/consul.service')
-                        time.sleep(2)
+                        render_and_push('consul.service.j2', consul_service_params, vm, '/etc/systemd/system/consul.service')
+                        render_and_push('consul_params.json.j2', consul_service_params,
+                                        vm, consul_service_params['consul_conf_dir'])
                         print "starting consul"
-                        lxc('exec', vm, '--', 'mkdir', '-p', consul_params['data_dir'])
-                        lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_conf_dir'])
+                        lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['data_dir'])
+                        lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
                         lxc('exec', vm, 'systemctl', 'start', 'consul')
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
