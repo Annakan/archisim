@@ -160,13 +160,13 @@ def decribe_os (os, release, arch):
 if __name__ == "__main__":
 
     args = make_arg_parser().parse_args()
-    (os_kind, arch, init_sytem) = decribe_os(args.os, args.release, args.arch)
+    (os_kind, arch, init_system) = decribe_os(args.os, args.release, args.arch)
     install_consul = args.install_consul or args.install_consul_server
 
     vms = list_vm()
 
     for vm in args.vm_names:
-        #  If the container mentionned in args already exist we destroy it first and later rebuild it in full
+        #  If a container mentioned in args already exist we destroy it first and later rebuild it in full
         if vm in vms:
             print "cleaning [{}]".format(vm)
             remove_grains(vm)
@@ -223,8 +223,8 @@ if __name__ == "__main__":
                     }
                     consul_params = {
                         'node_name': vm.name,
-                        'datacenter': 'anssi',
-                        'bind': vm.mainIPV4,  # @todo better use the secondary network probably here
+                        'datacenter': 'AnSSI',
+                        'bind': vm.mainIPV4,  # @todo better to use the secondary network probably here
                         'data_dir': '/opt/consul/data',
                         'retry_join': args.join_nodes,
                     }
@@ -240,13 +240,13 @@ if __name__ == "__main__":
                     local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
                     lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINPATH))
                     lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINPATH)
-                    if init_sytem == "systemd":
+                    render_and_push('consul_params.json.j2', consul_service_params,
+                                    vm, consul_service_params['consul_conf_dir'])
+                    print "starting consul"
+                    lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['data_dir'])
+                    lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
+                    if init_system == "systemd":
                         render_and_push('consul.service.j2', consul_service_params, vm, '/etc/systemd/system/consul.service')
-                        render_and_push('consul_params.json.j2', consul_service_params,
-                                        vm, consul_service_params['consul_conf_dir'])
-                        print "starting consul"
-                        lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['data_dir'])
-                        lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
                         lxc('exec', vm, 'systemctl', 'start', 'consul')
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
