@@ -9,7 +9,7 @@
   {% else %}
     "client": true,
   {%endif  %}
-  "retry-join": "{{ join_list }}"
+  {% if join_list is not None  %} "retry-join": "{{ join_list }}" {% endif %}
   {% if bind_address is defined %} "bind_addr": "{{ bind_addr }}" {% endif %},
   {% if retry-interval  is defined %} "retry-interval": "{{retry-interval}}" {% endif %},
   "datacenter": "{{datacenter}}",
