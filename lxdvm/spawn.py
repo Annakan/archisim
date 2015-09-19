@@ -197,18 +197,18 @@ if __name__ == "__main__":
             else:
                 print "Configuring VM [{}] ({})".format(vm, info)
                 # 'id' is the final part of the assignated IP, we will build the private network IP based on it
-                # At that point of the (re-)creation process the containers have only one IP, the brdiged assigned one.
-                id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of adresses?
+                # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
+                id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
                 print "id [{}]".format(id)
                 print "preparing the VM network interfaces"
                 render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
                 print "Starting the newly added private interface"
                 lxc('exec', vm, 'ifup', 'eth1')
-                #  bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
+                #  Bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
                 print "bootstrap"
                 lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
                 lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
-                #  and we push a default ssh key on the root of the VM
+                #  And we push a default ssh key on the root of the VM
                 print "ssh auth installation"
                 lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
                               '%s/root/.ssh/authorized_keys' % vm)
@@ -236,7 +236,7 @@ if __name__ == "__main__":
                              'bootstrap_expect_value': max(len(args.install_consul_server), 0),
                             }
                         )
-                    consul_bin = 'consul64' if arch =='amd64' else 'consul32'
+                    consul_bin = 'consul64' if arch == 'amd64' else 'consul32'
                     local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
                     lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINPATH))
                     lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINPATH)
@@ -246,14 +246,15 @@ if __name__ == "__main__":
                     lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['data_dir'])
                     lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
                     if init_system == "systemd":
-                        render_and_push('consul.service.j2', consul_service_params, vm, '/etc/systemd/system/consul.service')
+                        render_and_push('consul.service.j2', consul_service_params, vm,
+                                        '/etc/systemd/system/consul.service')
                         lxc('exec', vm, 'systemctl', 'start', 'consul')
 
         #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
         names.append(dict(ip="192.168.99.%s" % id, names=["%s.private.lan" % vm]))
 
-    # rewritting the /etc/hosts file on the HOST (where the lxd daemon sits)
+    # Rewriting the /etc/hosts file on the HOST (where the lxd daemon sits)
     # @TODO update hostfile and not full rewrite, we can share ;)
     tpl = jj_env.get_template('hosts.j2')
     tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
