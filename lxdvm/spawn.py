@@ -7,6 +7,7 @@ from sh import lxc, sudo, ssh_keygen
 from sh import Command
 import time
 import os.path
+from os.path import join
 
 import argparse
 from tempfile import NamedTemporaryFile
@@ -22,7 +23,8 @@ UID = GUID = 10000
 PRIVATE_NETWORK = "192.168.0.0"
 
 CNR_CONSUL_PATH = '/opt/consul/'
-CNR_CONSUL_BINPATH = os.path.join(CNR_CONSUL_PATH, 'bin/consul')
+CNR_CONSUL_BINARY = join(CNR_CONSUL_PATH, 'bin/consul')
+
 
 WAIT_NETWORK_STATE = 10
 
@@ -32,8 +34,8 @@ WAIT_NETWORK_STATE = 10
 
 jj_env = jinja2.Environment(loader=jinja2.FileSystemLoader('./templates'))
 
-def make_arg_parser():
 
+def make_arg_parser():
     parser = argparse.ArgumentParser(description='Create LXD VM and register them dynamically')
     parser.add_argument("vm_names", help="name of  VMs to create (hostname)", nargs='+')  # Done
     parser.add_argument("--private_network", help="IP address of the private network", default=PRIVATE_NETWORK)
@@ -47,16 +49,15 @@ def make_arg_parser():
     consul_group = parser.add_mutually_exclusive_group()
     consul_group.add_argument('--install_consul', help="install Consul client", action='store_true', default=False)
     # @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
-    consul_group.add_argument('--install_consul_server',
-                              help="install Consul as server with the node addresses "
-                                   "supplied to join (can be zero for first server)")
+    consul_group.add_argument('--install_consul_server', type=int,
+                              help="install Consul as server with given number of server total expected ")
     consul_group.add_argument('--join_nodes', help="list of nodes to join as a server or client",
-                              nargs='*', default="127.0.0.1")
+                              nargs='*', default=None)
 
     os_group = parser.add_argument_group("OS params", "parameters for OS type, versions and architecture")
     os_group.add_argument("--os", help="OS version", default='centos')  # Done
     os_group.add_argument("--release", help="OS release", default='7')  # Done
-    os_group.add_argument("--arch", help="OS architecture",  default='amd64')  # Done
+    os_group.add_argument("--arch", help="OS architecture", default='amd64')  # Done
 
     salt_group = parser.add_argument_group("salt params", "parameters for salt configuration of VMs")
     salt_group.add_argument("--salty", help="Make it a salt minion for the given master")
@@ -64,7 +65,7 @@ def make_arg_parser():
     salt_group.add_argument("--grain", help="Set the given grains for the minion(s) (require --salty)", action='append')
 
     parser.add_argument("--template", help="Use the given file template to get options, "
-                                           "command line arguments will override template values",  action='append')
+                                           "command line arguments will override template values", action='append')
 
     return parser
 
@@ -77,7 +78,7 @@ def list_vm():
     blob = lxc.list().split('\n')[3:-2]
     blob = [[a.strip() for a in line.split('|')[1:-1]]
             for line in blob]
-    result = dict([(c[0], ConInfo(*(tuple(c)+(c[2].split(',')[0], c[3].split(',')[0])))) for c in blob])
+    result = dict([(c[0], ConInfo(*(tuple(c) + (c[2].split(',')[0], c[3].split(',')[0])))) for c in blob])
     return result
 
 
@@ -96,7 +97,7 @@ def make_salt_master():
     pass
 
 
-def wait_for_vms(vmnames, maxwait=30*1000):
+def wait_for_vms(vmnames, maxwait=30 * 1000):
     """
     Wait for one or more containers to be ready (Running state)
     :param vmnames: name of the container or list of name of containers to wait for their running state
@@ -114,7 +115,7 @@ def wait_for_vms(vmnames, maxwait=30*1000):
             print '.',
             vmlist = list_vm()
             time.sleep(1)
-            if time.time()-start > maxwait:
+            if time.time() - start > maxwait:
                 print '/'
                 return False
     print '+'
@@ -126,15 +127,17 @@ def render_and_push(template, data, vm, target_file_path):
         tpl = jj_env.get_template(template)
         tpl.stream(data).dump(tempfile)
         tempfile.flush()
-        if target_file_path[:-1] == os.path.sep and os.path.splitext(template)[1] == '.j2':
-            target_file_path = os.path.join(target_file_path, os.path.splitext(template)[0])
-        else:
-            raise ValueError("can't determine the full target filename from {} and {}".format(template, target_file_path))
+        if target_file_path[:-1] == os.path.sep:
+            if os.path.splitext(template)[1] == '.j2':
+                target_file_path = os.path.join(target_file_path, os.path.splitext(template)[0])
+            else:
+                raise ValueError(
+                    "can't determine the full target filename from {} and {}".format(template, target_file_path))
         lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_path))
         os.remove(tempfile.name)
 
 
-def decribe_os (os, release, arch):
+def decribe_os(os, release, arch):
     arch = 'amd64' if args.arch in ['amd64', 'x64'] else 'i386'
     os = os.lower()
     if os in ('redhat', 'centos', 'fedora', 'rh'):
@@ -150,12 +153,13 @@ def decribe_os (os, release, arch):
     if os_kind == 'rh':
         init_system = 'systemd' if release > 6 else 'initd'
     else:
-        if os_kind =='debian':
+        if os_kind == 'debian':
             init_system = 'systemd' if release > 7 else 'init'
         else:
             init_system = None
 
     return os_kind, arch, init_system
+
 
 if __name__ == "__main__":
 
@@ -164,6 +168,8 @@ if __name__ == "__main__":
     install_consul = args.install_consul or args.install_consul_server
 
     vms = list_vm()
+
+    print "OS: {} arch: {} init system: {}".format(os_kind, arch, init_system)
 
     for vm in args.vm_names:
         #  If a container mentioned in args already exist we destroy it first and later rebuild it in full
@@ -182,14 +188,14 @@ if __name__ == "__main__":
     wait_for_vms(list_vm().keys(), WAIT_NETWORK_STATE)
 
     time.sleep(WAIT_NETWORK_STATE)
-    print "--"*100
+    print "--" * 100
     print list_vm()
-    print "--"*100
+    print "--" * 100
 
     names = []
 
     for vm, info in list_vm().items():
-        if not args.rebuild_all and vm not in args.vm_names :
+        if not args.rebuild_all and vm not in args.vm_names:
             print "skipping configuration of Container [{}] because rebuild_all=False".format(vm)
         else:
             if info.state != 'RUNNING':
@@ -217,40 +223,47 @@ if __name__ == "__main__":
                     print "installing consul"
                     # @todo check consul is downloaded
                     consul_service_params = {
-                        'local_consul_bin_path': CNR_CONSUL_PATH,
+                        'consul_bin_path': CNR_CONSUL_BINARY,
                         'consul_conf_dir': '/opt/consul/etc/',
                         'consul_service_dir': '/opt/consul/etc/consul.d/',
+                        'main_config_file': '/opt/consul/etc/base_consul.json',
                     }
                     consul_params = {
-                        'node_name': vm.name,
+                        'node_name': vm,
                         'datacenter': 'AnSSI',
-                        'bind': vm.mainIPV4,  # @todo better to use the secondary network probably here
-                        'data_dir': '/opt/consul/data',
-                        'retry_join': args.join_nodes,
+                        'bind': info.mainIPV4,  # @todo better to use the secondary network probably here
+                        'consul_data_dir': '/opt/consul/data',
+                        'retry_join': args.join_nodes if args.join_nodes else None,
                     }
 
                     if args.install_consul_server:
                         consul_params.update(
                             {
-                             'server_mode': True,
-                             'bootstrap_expect_value': max(len(args.install_consul_server), 0),
+                                'server_mode': True,
+                                'bootstrap_expect_value': args.install_consul_server,
                             }
                         )
                     consul_bin = 'consul64' if arch == 'amd64' else 'consul32'
-                    local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
-                    lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINPATH))
-                    lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINPATH)
-                    render_and_push('consul_params.json.j2', consul_service_params,
-                                    vm, consul_service_params['consul_conf_dir'])
-                    print "starting consul"
-                    lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['data_dir'])
+                    lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'bin'))
+                    lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'etc'))
+                    lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'data'))
+                    lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
                     lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
+                    local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
+                    lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINARY))
+                    lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINARY)
+                    render_and_push('consul_params.json.j2', consul_params,
+                                    vm, consul_service_params['main_config_file'])
+                    print "starting consul"
                     if init_system == "systemd":
                         render_and_push('consul.service.j2', consul_service_params, vm,
                                         '/etc/systemd/system/consul.service')
                         lxc('exec', vm, 'systemctl', 'start', 'consul')
+                    if args.os == "ubuntu":
+                        dnsmasq_config = '''echo "server=/consul/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul'''
+                        lxc('exec', vm, '--', '/bin/bash', '-c', dnsmasq_config)
 
-        #  Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
+        # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
         names.append(dict(ip="192.168.99.%s" % id, names=["%s.private.lan" % vm]))
 
@@ -260,6 +273,6 @@ if __name__ == "__main__":
     tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
     sudo.mv('hosts.tmp', '/etc/hosts')
 
-    print "*"*100
+    print "*" * 100
     print "{}, Done".format(SCRIPTNAME)
-    print "*"*100
+    print "*" * 100

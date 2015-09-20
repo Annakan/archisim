@@ -1,17 +1,14 @@
 {
-  "domain": "consul.",
-  "data_dir": "{{ consul_data_dir }}",
-  "log_level": "INFO",
-  "node_name": {{ node_name }},
-  {% if server_mode %}
-    "server": true,
-    bootstrap-expect": {{ bootstrap_expect_value }},
-  {% else %}
-    "client": true,
-  {%endif  %}
-  {% if join_list is not None  %} "retry-join": "{{ join_list }}" {% endif %}
-  {% if bind_address is defined %} "bind_addr": "{{ bind_addr }}" {% endif %},
-  {% if retry-interval  is defined %} "retry-interval": "{{retry-interval}}" {% endif %},
-  "datacenter": "{{datacenter}}",
-  "rejoin_after_leave": true
+"domain": "consul.",
+"data_dir": "{{ consul_data_dir }}",
+"log_level": "INFO",
+"node_name": "{{ node_name }}",
+{% if server_mode %}"server": true,
+"bootstrap_expect": {{ bootstrap_expect_value }},
+{%endif  %}
+{% if join_list is not none  %}"retry_join": [{{ join_list }}], {% endif %}
+{% if bind_address is defined %}"bind_addr": "{{ bind_addr }}", {% endif %}
+{% if retry_interval is defined %}"retry_interval": "{{retry_interval}}", {% endif %}
+"datacenter": "{{datacenter}}",
+"rejoin_after_leave": true
 }
