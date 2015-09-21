@@ -8,7 +8,7 @@ EnvironmentFile=-{{env_file_path|default('/etc/sysconfig/consul')}}
 Environment=GOMAXPROCS=2
 Restart=on-failure
 {# ExecStart=/usr/local/sbin/consul agent $OPTIONS -config-dir=/etc/consul.d #}
-ExecStart={{ consul_bin_path | default('/usr/local/sbin/consul')}} agent $OPTIONS -config-file={{ main_config_file }} -config-dir={{ consul_conf_dir |default('/etc/consul.d') }}
+ExecStart={{ consul_bin_path | default('/usr/local/sbin/consul')}} agent $OPTIONS -config-file={{ main_config_file }} -config-dir={{ consul_service_dir |default('/etc/consul.d') }}
 ExecStop={{ consul_bin_path | default('/usr/local/sbin/consul')}} leave
 ExecReload=/bin/kill -HUP $MAINPID
 KillSignal=SIGINT

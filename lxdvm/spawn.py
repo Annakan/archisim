@@ -51,7 +51,7 @@ def make_arg_parser():
     # @todo see if it is possible to automatically get the previous consul servers and join them (local db file)
     consul_group.add_argument('--install_consul_server', type=int,
                               help="install Consul as server with given number of server total expected ")
-    consul_group.add_argument('--join_nodes', help="list of nodes to join as a server or client",
+    parser.add_argument('--join_nodes', help="list of nodes to join as a server or client",
                               nargs='*', default=None)
 
     os_group = parser.add_argument_group("OS params", "parameters for OS type, versions and architecture")
@@ -127,6 +127,7 @@ def render_and_push(template, data, vm, target_file_path):
         tpl = jj_env.get_template(template)
         tpl.stream(data).dump(tempfile)
         tempfile.flush()
+        tempfile.close()
         if target_file_path[:-1] == os.path.sep:
             if os.path.splitext(template)[1] == '.j2':
                 target_file_path = os.path.join(target_file_path, os.path.splitext(template)[0])
@@ -134,6 +135,7 @@ def render_and_push(template, data, vm, target_file_path):
                 raise ValueError(
                     "can't determine the full target filename from {} and {}".format(template, target_file_path))
         lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_path))
+        lxc('exec', vm, 'sync')
         os.remove(tempfile.name)
 
 
@@ -208,6 +210,8 @@ if __name__ == "__main__":
                 print "id [{}]".format(id)
                 print "preparing the VM network interfaces"
                 render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
+                lxc('exec', vm, 'sync')
+                time.sleep(5)
                 print "Starting the newly added private interface"
                 lxc('exec', vm, 'ifup', 'eth1')
                 #  Bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
@@ -228,6 +232,7 @@ if __name__ == "__main__":
                         'consul_service_dir': '/opt/consul/etc/consul.d/',
                         'main_config_file': '/opt/consul/etc/base_consul.json',
                     }
+                    # join_nodes = args.join_nodes.split()
                     consul_params = {
                         'node_name': vm,
                         'datacenter': 'AnSSI',
@@ -250,6 +255,8 @@ if __name__ == "__main__":
                     lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
                     lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
                     local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
+                    # lxc('exec', vm, 'sync')
+                    time.sleep(5)
                     lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINARY))
                     lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINARY)
                     render_and_push('consul_params.json.j2', consul_params,
@@ -260,7 +267,7 @@ if __name__ == "__main__":
                                         '/etc/systemd/system/consul.service')
                         lxc('exec', vm, 'systemctl', 'start', 'consul')
                     if args.os == "ubuntu":
-                        dnsmasq_config = '''echo "server=/consul/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul'''
+                        dnsmasq_config = '''echo "server=/consul/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul.conf'''
                         lxc('exec', vm, '--', '/bin/bash', '-c', dnsmasq_config)
 
         # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
