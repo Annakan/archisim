@@ -163,6 +163,76 @@ def decribe_os(os, release, arch):
     return os_kind, arch, init_system
 
 
+def create_container((vm, info, os_kind, arch, init_system, args)):
+    global id
+    print "Configuring VM [{}] ({})".format(vm, info)
+    # 'id' is the final part of the assignated IP, we will build the private network IP based on it
+    # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
+    id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
+    print "id [{}]".format(id)
+    print "preparing the VM network interfaces"
+    render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
+    lxc('exec', vm, 'sync')
+    time.sleep(5)
+    print "Starting the newly added private interface"
+    lxc('exec', vm, 'ifup', 'eth1')
+    #  Bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
+    print "bootstrap"
+    lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
+    lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
+    #  And we push a default ssh key on the root of the VM
+    print "ssh auth installation"
+    lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
+                  '%s/root/.ssh/authorized_keys' % vm)
+    # installing consul
+    if install_consul:
+        print "installing consul"
+        # @todo check consul is downloaded
+        consul_service_params = {
+            'consul_bin_path': CNR_CONSUL_BINARY,
+            'consul_conf_dir': '/opt/consul/etc/',
+            'consul_service_dir': '/opt/consul/etc/consul.d/',
+            'main_config_file': '/opt/consul/etc/base_consul.json',
+        }
+        # join_nodes = args.join_nodes.split()
+        consul_params = {
+            'node_name': vm,
+            'datacenter': 'AnSSI',
+            'bind': info.mainIPV4,  # @todo better to use the secondary network probably here
+            'consul_data_dir': '/opt/consul/data',
+            'retry_join': args.join_nodes if args.join_nodes else None,
+        }
+
+        if args.install_consul_server:
+            consul_params.update(
+                {
+                    'server_mode': True,
+                    'bootstrap_expect_value': args.install_consul_server,
+                }
+            )
+        consul_bin = 'consul64' if arch == 'amd64' else 'consul32'
+        lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'bin'))
+        lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'etc'))
+        lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'data'))
+        lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
+        lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
+        local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
+        # lxc('exec', vm, 'sync')
+        time.sleep(5)
+        lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINARY))
+        lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINARY)
+        render_and_push('consul_params.json.j2', consul_params,
+                        vm, consul_service_params['main_config_file'])
+        print "starting consul"
+        if init_system == "systemd":
+            render_and_push('consul.service.j2', consul_service_params, vm,
+                            '/etc/systemd/system/consul.service')
+            lxc('exec', vm, 'systemctl', 'start', 'consul')
+        if args.os == "ubuntu":
+            dnsmasq_config = '''echo "server=/consul/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul.conf'''
+            lxc('exec', vm, '--', '/bin/bash', '-c', dnsmasq_config)
+
+
 if __name__ == "__main__":
 
     args = make_arg_parser().parse_args()
@@ -203,74 +273,8 @@ if __name__ == "__main__":
             if info.state != 'RUNNING':
                 print "not Configuring VM [{}] ({}) because it is stopped and not in the list".format(vm, info)
             else:
-                print "Configuring VM [{}] ({})".format(vm, info)
-                # 'id' is the final part of the assignated IP, we will build the private network IP based on it
-                # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
-                id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
-                print "id [{}]".format(id)
-                print "preparing the VM network interfaces"
-                render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
-                lxc('exec', vm, 'sync')
-                time.sleep(5)
-                print "Starting the newly added private interface"
-                lxc('exec', vm, 'ifup', 'eth1')
-                #  Bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
-                print "bootstrap"
-                lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
-                lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
-                #  And we push a default ssh key on the root of the VM
-                print "ssh auth installation"
-                lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
-                              '%s/root/.ssh/authorized_keys' % vm)
-                # installing consul
-                if install_consul:
-                    print "installing consul"
-                    # @todo check consul is downloaded
-                    consul_service_params = {
-                        'consul_bin_path': CNR_CONSUL_BINARY,
-                        'consul_conf_dir': '/opt/consul/etc/',
-                        'consul_service_dir': '/opt/consul/etc/consul.d/',
-                        'main_config_file': '/opt/consul/etc/base_consul.json',
-                    }
-                    # join_nodes = args.join_nodes.split()
-                    consul_params = {
-                        'node_name': vm,
-                        'datacenter': 'AnSSI',
-                        'bind': info.mainIPV4,  # @todo better to use the secondary network probably here
-                        'consul_data_dir': '/opt/consul/data',
-                        'retry_join': args.join_nodes if args.join_nodes else None,
-                    }
-
-                    if args.install_consul_server:
-                        consul_params.update(
-                            {
-                                'server_mode': True,
-                                'bootstrap_expect_value': args.install_consul_server,
-                            }
-                        )
-                    consul_bin = 'consul64' if arch == 'amd64' else 'consul32'
-                    lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'bin'))
-                    lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'etc'))
-                    lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'data'))
-                    lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
-                    lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
-                    local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
-                    # lxc('exec', vm, 'sync')
-                    time.sleep(5)
-                    lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINARY))
-                    lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINARY)
-                    render_and_push('consul_params.json.j2', consul_params,
-                                    vm, consul_service_params['main_config_file'])
-                    print "starting consul"
-                    if init_system == "systemd":
-                        render_and_push('consul.service.j2', consul_service_params, vm,
-                                        '/etc/systemd/system/consul.service')
-                        lxc('exec', vm, 'systemctl', 'start', 'consul')
-                    if args.os == "ubuntu":
-                        dnsmasq_config = '''echo "server=/consul/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul.conf'''
-                        lxc('exec', vm, '--', '/bin/bash', '-c', dnsmasq_config)
-
-        # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
+                create_container(vm, info, os_kind, arch, init_system, args)
+                # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
         names.append(dict(ip="192.168.99.%s" % id, names=["%s.private.lan" % vm]))
 

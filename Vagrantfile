@@ -113,13 +113,12 @@ Vagrant.configure(2) do |config|
     sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /home/vagrant/.profile
     export DEBIAN_FRONTEND=noninteractive
     timedatectl set-timezone Europe/Paris
-    apt-get update
-    apt-get install language-pack-fr
-    apt-get install flip
-    apt-get -y install python-dev software-properties-common python-software-properties libyaml-dev unzip curl dnsutils
     add-apt-repository ppa:ubuntu-lxc/lxd-stable
     apt-get update
     apt-get upgrade -y
+    apt-get install language-pack-fr
+    apt-get install flip
+    apt-get -y install python-dev software-properties-common python-software-properties libyaml-dev unzip curl dnsutils
     apt-get install -y lxd
     # apt-get install -y python-sh python-yaml python-jinja2
     service lxd start
