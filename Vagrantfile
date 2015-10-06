@@ -117,8 +117,6 @@ Vagrant.configure(2) do |config|
     timedatectl set-timezone Europe/Paris
     apt-get update
     apt-get upgrade -y
-    # cf https://github.com/lxc/lxd/issues/946 kerner > 3.19.0-25 unsupported for now
-    apt-get  install -y linux-image-extra-3.19.0-25-generic linux-headers-3.19.0-25-generic
     apt-get install language-pack-fr
     apt-get install flip
     apt-get -y install software-properties-common
@@ -165,5 +163,12 @@ Vagrant.configure(2) do |config|
 
     #Fake private network
     route add -net 192.168.99.0 netmask 255.255.255.0 lxcbr0
+
+    #sysdig
+    curl -s https://s3.amazonaws.com/download.draios.com/DRAIOS-GPG-KEY.public | sudo apt-key add -
+    curl -s -o /etc/apt/sources.list.d/draios.list http://download.draios.com/stable/deb/draios.list
+    sudo apt-get update
+    sudo apt-get -y install sysdig
+
   SHELL
 end
