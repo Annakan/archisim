@@ -100,8 +100,10 @@ Vagrant.configure(2) do |config|
   #auto update des vmwaretools  cf https://docs.vagrantup.com/v2/vmware/kernel-upgrade.html
   # Ensure that VMWare Tools recompiles kernel modules when we update the linux images
   $fix_vmware_tools_script = <<-SCRIPT
-  su -c sed -i.bak 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations ; true
-  su -c sed -i.bak 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations ; true
+  com1="sed -i 's/answer AUTO_KMODS_ENABLED_ANSWER no/answer AUTO_KMODS_ENABLED_ANSWER yes/g' /etc/vmware-tools/locations ; true"
+  com2="sed -i 's/answer AUTO_KMODS_ENABLED no/answer AUTO_KMODS_ENABLED yes/g' /etc/vmware-tools/locations ; true"
+  su -c "$com1"
+  su -c "$com2"
   SCRIPT
   config.vm.provision :shell, :inline =>  $fix_vmware_tools_script; 
 
@@ -113,14 +115,17 @@ Vagrant.configure(2) do |config|
     sed -i 's/^mesg n$/tty -s \\&\\& mesg n/g' /home/vagrant/.profile
     export DEBIAN_FRONTEND=noninteractive
     timedatectl set-timezone Europe/Paris
-    add-apt-repository ppa:ubuntu-lxc/lxd-stable
     apt-get update
     apt-get upgrade -y
+    # cf https://github.com/lxc/lxd/issues/946 kerner > 3.19.0-25 unsupported for now
+    apt-get  install -y linux-image-extra-3.19.0-25-generic linux-headers-3.19.0-25-generic
     apt-get install language-pack-fr
     apt-get install flip
-    apt-get -y install python-dev software-properties-common python-software-properties libyaml-dev unzip curl dnsutils
+    apt-get -y install software-properties-common
+    apt-get -y install python-dev python-software-properties libyaml-dev unzip curl dnsutils
+    add-apt-repository -y ppa:ubuntu-lxc/lxd-stable
+    apt-get update
     apt-get install -y lxd
-    # apt-get install -y python-sh python-yaml python-jinja2
     service lxd start
     wget https://bootstrap.pypa.io/get-pip.py
     python get-pip.py --force-reinstall  --install-option="--install-scripts=/usr/bin"
@@ -133,12 +138,12 @@ Vagrant.configure(2) do |config|
     echo "root:1000000:65536" | sudo tee -a /etc/subuid /etc/subgid
     #
     # Chef is just boring
-    apt-get remove --purge -y chef
+    sudo apt-get remove --purge -y chef
 
     # Just like puppet
-    apt-get remove --purge -y puppet
+    sudo apt-get remove --purge -y puppet
 
-    apt-get autoremove -y
+    sudo apt-get autoremove -y
 
     #make sure whatever the git checkout the file is in unix endings
     su -c 'cd /vagrant/lxdvm && flip -u *' vagrant
@@ -153,7 +158,9 @@ Vagrant.configure(2) do |config|
 
     # Allowing name based ip configuration for LXC container
     # http://askubuntu.com/questions/446831/how-to-let-built-in-dhcp-assign-a-static-ip-to-lxc-container-based-on-name-not
-    sudo sed -i .bak 's/#LXC_DHCP_CONFILE=/LXC_DHCP_CONFILE=/'  /etc/default/lxc-net
+    com3="sed -i 's/#LXC_DHCP_CONFILE=/LXC_DHCP_CONFILE=/'  /etc/default/lxc-net"
+    su -c "$com3"
+    sudo touch /etc/lxc/dnsmasq.conf
     sudo systemctl restart lxc-net
 
     #Fake private network
