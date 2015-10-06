@@ -151,6 +151,11 @@ Vagrant.configure(2) do |config|
     lxc profile device add twoNets eth0 nic parent=lxcbr0 nictype=bridged
     lxc profile device add twoNets eth1 nic parent=lxcbr0 nictype=bridged
 
+    # Allowing name based ip configuration for LXC container
+    # http://askubuntu.com/questions/446831/how-to-let-built-in-dhcp-assign-a-static-ip-to-lxc-container-based-on-name-not
+    sudo sed -i .bak 's/#LXC_DHCP_CONFILE=/LXC_DHCP_CONFILE=/'  /etc/default/lxc-net
+    sudo systemctl restart lxc-net
+
     #Fake private network
     route add -net 192.168.99.0 netmask 255.255.255.0 lxcbr0
   SHELL

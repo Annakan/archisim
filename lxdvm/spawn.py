@@ -163,7 +163,7 @@ def decribe_os(os, release, arch):
     return os_kind, arch, init_system
 
 
-def create_container((vm, info, os_kind, arch, init_system, args)):
+def create_container(vm, info, os_kind, arch, init_system, args):
     global id
     print "Configuring VM [{}] ({})".format(vm, info)
     # 'id' is the final part of the assignated IP, we will build the private network IP based on it
