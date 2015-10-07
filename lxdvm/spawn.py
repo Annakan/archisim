@@ -8,6 +8,8 @@ from sh import Command
 import time
 import os.path
 from os.path import join
+from copy import copy
+
 
 import argparse
 from tempfile import NamedTemporaryFile
@@ -20,7 +22,7 @@ LOCALDIRNAME, SCRIPTNAME = os.path.split(os.path.abspath(sys.argv[0]))
 
 CON_TEMPLATE_DIR = ""
 UID = GUID = 10000
-PRIVATE_NETWORK = "192.168.0.0"
+PRIVATE_NETWORK = "192.168.0."
 
 CNR_CONSUL_PATH = '/opt/consul/'
 CNR_CONSUL_BINARY = join(CNR_CONSUL_PATH, 'bin/consul')
@@ -34,18 +36,34 @@ WAIT_NETWORK_STATE = 10
 jj_env = jinja2.Environment(loader=jinja2.FileSystemLoader('./templates'))
 
 
-class static_ip_gen():
+class StaticIPGen():
 
-    def __init__(self, base_ip, reservation = 10):
-        self.base_ip = ""
+    def __init__(self, base_ip, reservation = 10, containers=None):
+        self.base_ip = base_ip
         self.reservation = reservation
-        self.ip_list = ()
+        self.con_ips = {}
+        self.con_names = {}
+        self.ip_rank = 0
+        if containers:
+            self.regenerate_ips(containers)
 
-    def get_newip(self, name):
-        pass
+    def get_next_ip(self, name):
+        self.ip_rank += 1
+        new_ip = self.base_ip+str(self.ip_rank)
+        self.con_ips[name] = new_ip
+        self.con_names[new_ip] = name
+        return new_ip
 
-    def list_ips(self):
-        pass
+    def ip_list(self):
+        return copy(self.con_ips)
+
+    def regenerate_ips(self, cont_list):
+        for con in cont_list.itervalues():
+            assert isinstance(con, ConInfo)
+            con_ip = con.mainIPV4
+            if con_ip.split('.')[-1] < self.reservation:
+                self.con_ips[con.name] = con_ip
+                self.con_names[con_ip] = con.name
 
 
 def make_arg_parser():
@@ -266,6 +284,9 @@ if __name__ == "__main__":
     install_consul = args.install_consul or args.install_consul_server
 
     vms = list_vm()
+
+    ip_gen = StaticIPGen(PRIVATE_NETWORK, 10, vms)
+
 
     print "OS: {} arch: {} init system: {}".format(os_kind, arch, init_system)
 
