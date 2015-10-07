@@ -29,10 +29,23 @@ CNR_CONSUL_BINARY = join(CNR_CONSUL_PATH, 'bin/consul')
 WAIT_NETWORK_STATE = 10
 
 
-
 # dl_consul = Command(os.path.join(LOCALDIRNAME, 'dl_consul.sh'))
 
 jj_env = jinja2.Environment(loader=jinja2.FileSystemLoader('./templates'))
+
+
+class static_ip_gen():
+
+    def __init__(self, base_ip, reservation = 10):
+        self.base_ip = ""
+        self.reservation = reservation
+        self.ip_list = ()
+
+    def get_newip(self, name):
+        pass
+
+    def list_ips(self):
+        pass
 
 
 def make_arg_parser():
@@ -120,6 +133,19 @@ def wait_for_vms(vmnames, maxwait=30 * 1000):
                 return False
     print '+'
     return True
+
+
+def setup_base_config():
+    """
+    Create the base infrastructure of the containers :
+    - 3 consul servers
+    - a freeIPA server (or two ?)
+    The idea is that this is the correct structure than can then be exported (migrated) to other LXD servers.
+
+    The infrastructure containers are "fixed" ip containers under centos7 (could be unbuntu)
+
+    :return:  list of ConInfo(s) about the created containers
+    """
 
 
 def render_and_push(template, data, vm, target_file_path):
