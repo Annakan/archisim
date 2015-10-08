@@ -127,11 +127,14 @@ Vagrant.configure(2) do |config|
     service lxd start
     wget https://bootstrap.pypa.io/get-pip.py
     python get-pip.py --force-reinstall  --install-option="--install-scripts=/usr/bin"
+
     pip install virtualenv
     pip install sh
     pip install jinja2
     pip install pyaml
     pip install argparse
+    pip install dnspython
+
     adduser vagrant lxd
     echo "root:1000000:65536" | sudo tee -a /etc/subuid /etc/subgid
     #

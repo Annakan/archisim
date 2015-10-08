@@ -3,18 +3,23 @@
 
 import sys
 import jinja2
-from sh import lxc, sudo, ssh_keygen
+from sh import lxc, sudo, ssh_keygen, dig
 from sh import Command
+#import dns.resolver
+import socket
 import time
 import os.path
 from os.path import join
 from copy import copy
+import shutil
 
 
 import argparse
 from tempfile import NamedTemporaryFile
 
 from collections import namedtuple
+
+LXC_DNSMASQ_CONF = '/etc/lxc/dnsmasq.conf'
 
 ConInfo = namedtuple('ConInfo', ['name', 'state', 'IPV4s', 'IPV6s', 'ephemeral', 'snapshots', 'mainIPV4', 'mainIPV6'])
 
@@ -36,7 +41,7 @@ WAIT_NETWORK_STATE = 10
 jj_env = jinja2.Environment(loader=jinja2.FileSystemLoader('./templates'))
 
 
-class StaticIPGen():
+class StaticIPGen:
 
     def __init__(self, base_ip, reservation = 10, containers=None):
         self.base_ip = base_ip
@@ -92,7 +97,7 @@ def make_arg_parser():
 
     salt_group = parser.add_argument_group("salt params", "parameters for salt configuration of VMs")
     salt_group.add_argument("--salty", help="Make it a salt minion for the given master")
-    salt_group.add_argument("--sal_id", help="salt id, if not present the machine hostname is used")
+    salt_group.add_argument("--sal_id", help="salt con_id, if not present the machine hostname is used")
     salt_group.add_argument("--grain", help="Set the given grains for the minion(s) (require --salty)", action='append')
 
     parser.add_argument("--template", help="Use the given file template to get options, "
@@ -115,7 +120,7 @@ def list_vm():
 
 def remove_grains(vm):
     # check salt
-    # get true id
+    # get true con_id
     # remove grains
     pass
 
@@ -153,17 +158,55 @@ def wait_for_vms(vmnames, maxwait=30 * 1000):
     return True
 
 
-def setup_base_config():
+def update_dhcpd_fixed_ip(names_and_IPs):
+    with NamedTemporaryFile(mode='w', delete=False) as tempfile:
+        tpl = jj_env.get_template('fixed_ip_by_name.j2')
+        tpl.stream(names_and_IPs).dump(tempfile)
+        tempfile.flush()
+        tempfile.close()
+        if os.path.exists(LXC_DNSMASQ_CONF+'.old'):
+            os.remove(LXC_DNSMASQ_CONF+'.old')
+        shutil.move(LXC_DNSMASQ_CONF, LXC_DNSMASQ_CONF+'.old')
+        shutil.move(tempfile.name, LXC_DNSMASQ_CONF)
+
+    # restart dhcpd / dnsmaq ?
+
+
+def discover_and_setup_base_config(ipgen):
     """
     Create the base infrastructure of the containers :
     - 3 consul servers
     - a freeIPA server (or two ?)
+    - a salt master (or two)
     The idea is that this is the correct structure than can then be exported (migrated) to other LXD servers.
 
     The infrastructure containers are "fixed" ip containers under centos7 (could be unbuntu)
 
     :return:  list of ConInfo(s) about the created containers
     """
+    assert isinstance(ipgen, StaticIPGen)
+    container_names = ('consul1', 'consul2', 'consul3', 'saltmaster', 'FreeIPA')
+    # let's discover what we have and don't have
+    existing = dict()
+    to_build = dict()
+    for name in container_names:
+        try:
+            ip = socket.gethostbyname(name)
+            existing[name] = ip
+        except socket.gaierror:
+            ip = None
+            to_build[name] = ipgen.get_next_ip(name)
+
+    update_dhcpd_fixed_ip(to_build)
+    for name in to_build.keys():
+      create_container(name, 'centos', '7', 'amd64')
+
+    vms = list_vm()
+    building = vms.fromkeys(to_build.keys())
+
+    # now we need to configure the service container we just created
+    # base the service / role on the name
+    #@TODO ...
 
 
 def render_and_push(template, data, vm, target_file_path):
@@ -207,15 +250,15 @@ def decribe_os(os, release, arch):
     return os_kind, arch, init_system
 
 
-def create_container(vm, info, os_kind, arch, init_system, args):
-    global id
+def setup_container(vm, info, os_kind, arch, init_system, args):
+    global con_id
     print "Configuring VM [{}] ({})".format(vm, info)
-    # 'id' is the final part of the assignated IP, we will build the private network IP based on it
+    # 'con_id' is the final part of the assignated IP, we will build the private network IP based on it
     # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
-    id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
-    print "id [{}]".format(id)
+    con_id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
+    print "con_id [{}]".format(con_id)
     print "preparing the VM network interfaces"
-    render_and_push('interfaces.j2', {'id': id}, vm, '/etc/network/interfaces')
+    render_and_push('interfaces.j2', {'con_id': con_id}, vm, '/etc/network/interfaces')
     lxc('exec', vm, 'sync')
     time.sleep(5)
     print "Starting the newly added private interface"
@@ -277,6 +320,13 @@ def create_container(vm, info, os_kind, arch, init_system, args):
             lxc('exec', vm, '--', '/bin/bash', '-c', dnsmasq_config)
 
 
+def create_container(vm_name, os, release, arch, config_name):
+    if os.path.exists('home/vagrant/.ssh/known_hosts'):
+        ssh_keygen('-f', "/home/vagrant/.ssh/known_hosts", '-R', vm_name)
+    image_uri = "images:{os}/{release}/{arch}".format(**vars(args))
+    lxc.launch(image_uri, vm, '-p', config_name)
+
+
 if __name__ == "__main__":
 
     args = make_arg_parser().parse_args()
@@ -284,9 +334,7 @@ if __name__ == "__main__":
     install_consul = args.install_consul or args.install_consul_server
 
     vms = list_vm()
-
     ip_gen = StaticIPGen(PRIVATE_NETWORK, 10, vms)
-
 
     print "OS: {} arch: {} init system: {}".format(os_kind, arch, init_system)
 
@@ -297,10 +345,7 @@ if __name__ == "__main__":
             remove_grains(vm)
             lxc.delete(vm)
         print "Instantiating core [{}]".format(vm)
-        if os.path.exists('home/vagrant/.ssh/known_hosts'):
-            ssh_keygen('-f', "/home/vagrant/.ssh/known_hosts", '-R', vm)
-        image_uri = "images:{os}/{release}/{arch}".format(**vars(args))
-        lxc.launch(image_uri, vm, '-p', 'twoNets')
+        create_container(vm, os, args.release, 'twoNets')
         print "Done for core  [{}]".format(vm)
 
     print "waiting for network state stabilization for {} seconds".format(WAIT_NETWORK_STATE)
@@ -320,10 +365,10 @@ if __name__ == "__main__":
             if info.state != 'RUNNING':
                 print "not Configuring VM [{}] ({}) because it is stopped and not in the list".format(vm, info)
             else:
-                create_container(vm, info, os_kind, arch, init_system, args)
+                setup_container(vm, info, os_kind, arch, init_system, args)
                 # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
         names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
-        names.append(dict(ip="192.168.99.%s" % id, names=["%s.private.lan" % vm]))
+        names.append(dict(ip="192.168.99.%s" % con_id, names=["%s.private.lan" % vm]))
 
     # Rewriting the /etc/hosts file on the HOST (where the lxd daemon sits)
     # @TODO update hostfile and not full rewrite, we can share ;)
