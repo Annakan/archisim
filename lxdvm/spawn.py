@@ -4,14 +4,15 @@
 import sys
 import jinja2
 from sh import lxc, sudo, ssh_keygen, dig
-from sh import Command
 # import dns.resolver
 import socket
 import time
-import os.path
+import os.path as path
 from os.path import join
+from os import remove as remove_file
 from copy import copy
 import shutil
+import subprocess
 from argparse import Namespace, ArgumentParser
 from tempfile import NamedTemporaryFile
 from collections import namedtuple
@@ -19,8 +20,9 @@ from collections import namedtuple
 LXC_DNSMASQ_CONF = '/etc/lxc/dnsmasq.conf'
 
 ConInfo = namedtuple('ConInfo', ['name', 'state', 'IPV4s', 'IPV6s', 'ephemeral', 'snapshots', 'mainIPV4', 'mainIPV6'])
+DistInfo = namedtuple('DistInfo', ['os_kind', 'arch', 'init_system'])
 
-LOCALDIRNAME, SCRIPTNAME = os.path.split(os.path.abspath(sys.argv[0]))
+LOCALDIRNAME, SCRIPTNAME = path.split(path.abspath(sys.argv[0]))
 
 CON_TEMPLATE_DIR = ""
 UID = GUID = 10000
@@ -100,12 +102,12 @@ def make_arg_parser():
     return parser
 
 
-def list_vm():
+def list_vm(con_filter=''):
     """
     :return: a list of ConInfo (info on container) namedtuple representing the container known by the lxd daemon on the
     system.
     """
-    blob = lxc.list().split('\n')[3:-2]
+    blob = lxc.list(con_filter).split('\n')[3:-2]
     blob = [[a.strip() for a in line.split('|')[1:-1]]
             for line in blob]
     result = dict([(c[0], ConInfo(*(tuple(c) + (c[2].split(',')[0], c[3].split(',')[0])))) for c in blob])
@@ -155,13 +157,18 @@ def wait_for_vms(vmnames, maxwait=30 * 1000):
 def update_dhcpd_fixed_ip(names_and_IPs):
     with NamedTemporaryFile(mode='w', delete=False) as tempfile:
         tpl = jj_env.get_template('fixed_ip_by_name.j2')
-        tpl.stream(names_and_IPs).dump(tempfile)
+        tpl.stream(containers=names_and_IPs).dump(tempfile)
         tempfile.flush()
         tempfile.close()
-        if os.path.exists(LXC_DNSMASQ_CONF + '.old'):
-            os.remove(LXC_DNSMASQ_CONF + '.old')
-        shutil.move(LXC_DNSMASQ_CONF, LXC_DNSMASQ_CONF + '.old')
-        shutil.move(tempfile.name, LXC_DNSMASQ_CONF)
+        try:
+            if path.exists(LXC_DNSMASQ_CONF + '.old'):
+                subprocess.check_output(['/usr/bin/sudo', '/bin/rm', '-f', LXC_DNSMASQ_CONF+'.old'])
+            mv_cmd = "/bin/mv"
+            if path.exists(LXC_DNSMASQ_CONF ):
+                subprocess.check_output(["/usr/bin/sudo", mv_cmd, LXC_DNSMASQ_CONF, LXC_DNSMASQ_CONF + '.old'])
+            subprocess.check_output(["/usr/bin/sudo", mv_cmd, tempfile.name, LXC_DNSMASQ_CONF])
+        except subprocess.CalledProcessError as err:
+            print "error code", err.returncode, err.output
 
         # restart dhcpd / dnsmaq ?
 
@@ -179,7 +186,8 @@ def discover_and_setup_base_config(ipgen):
     :return:  list of ConInfo(s) about the created containers
     """
     assert isinstance(ipgen, StaticIPGen)
-    container_names = ('consul1', 'consul2', 'consul3', 'saltmaster', 'FreeIPA')
+    # container_names = ('consul1', 'consul2', 'consul3', 'saltmaster', 'FreeIPA')
+    container_names = ('consul1', 'consul2')
     # let's discover what we have and don't have
     existing = dict()
     to_build = dict()
@@ -187,24 +195,32 @@ def discover_and_setup_base_config(ipgen):
         try:
             ip = socket.gethostbyname(name)
             existing[name] = ip
+            print "Already existing {} {}".format(name, ip)
         except socket.gaierror:
+            print "tobuild {}".format(name)
             to_build[name] = ipgen.get_next_ip(name)
 
     update_dhcpd_fixed_ip(to_build)
-    for name in to_build.keys():
-        create_container(name, 'centos', '7', 'amd64')
 
+    for name in to_build.keys():
+        print "creating {}".format(name)
+        create_container(name, 'centos', '7', 'amd64', 'twoNets')
+    dist_info = decribe_os('centos', '7', 'amd64')
+
+    wait_for_vms(to_build.keys())
     vms = list_vm()
-    building = vms.fromkeys(to_build.keys())
+    building = dict((con_name, info) for con_name, info in vms.items() if con_name in to_build.keys())
 
     # now we need to configure the service containers we just created
     # base the service / role on the name
     # @TODO ...
-    consul_svr = ()
-    for container in building:
-        if "consul" in container:
-            consul_svr += container
-            toolset = Namespace(install_consul_server=True, join_nodes=())
+    consul_svrs = dict((con_name, info) for con_name, info in building.items() if "consul" in con_name)
+    consul_ips = set(con.mainIPV4 for con in consul_svrs.values())
+    for name, cnt in consul_svrs.iteritems():
+        print "consul container : " + name
+        join_nodes = consul_ips - set([cnt.mainIPV4])
+        toolset = Namespace(install_consul_server=True, join_nodes=join_nodes)
+        setup_container(cnt, cnt, dist_info, toolset=toolset)
 
 
 def render_and_push(template, data, vm, target_file_path):
@@ -213,15 +229,15 @@ def render_and_push(template, data, vm, target_file_path):
         tpl.stream(data).dump(tempfile)
         tempfile.flush()
         tempfile.close()
-        if target_file_path[:-1] == os.path.sep:
-            if os.path.splitext(template)[1] == '.j2':
-                target_file_path = os.path.join(target_file_path, os.path.splitext(template)[0])
+        if target_file_path[:-1] == path.sep:
+            if path.splitext(template)[1] == '.j2':
+                target_file_path = path.join(target_file_path, path.splitext(template)[0])
             else:
                 raise ValueError(
                     "can't determine the full target filename from {} and {}".format(template, target_file_path))
         lxc.file.push(tempfile.name, "{}/{}".format(vm, target_file_path))
         lxc('exec', vm, 'sync')
-        os.remove(tempfile.name)
+        remove_file(tempfile.name)
 
 
 def decribe_os(os, release, arch):
@@ -244,15 +260,15 @@ def decribe_os(os, release, arch):
             init_system = 'systemd' if release > 7 else 'init'
         else:
             init_system = None
-    return os_kind, arch, init_system
+    return DistInfo(os_kind, arch, init_system)
 
 
-def setup_container(vm, info, os_kind, arch, init_system, toolset):
-    print "Configuring VM [{}] ({})".format(vm, info)
-    install_consul = toolset.install_consul or toolset.install_consul_server
+def setup_container(vm, con_info, dist_info, toolset):
+    print "Configuring VM [{}] ({})".format(vm, con_info)
+    install_consul = toolset.install_consul_server or toolset.install_consul
     # 'secondary_ip' is the final part of the assignated IP, we will build the private network IP based on it
     # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
-    con_id = info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
+    con_id = con_info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
     secondary_ip = PRIVATE_NETWORK + ".%s" % con_id
     print "secondary_ip [{}]".format(con_id)
     print "preparing the VM network interfaces"
@@ -283,7 +299,7 @@ def setup_container(vm, info, os_kind, arch, init_system, toolset):
         consul_params = {
             'node_name': vm,
             'datacenter': 'AnSSI',
-            'bind': info.mainIPV4,  # @todo better to use the secondary network probably here
+            'bind': con_info.mainIPV4,  # @todo better to use the secondary network probably here
             'consul_data_dir': '/opt/consul/data',
             'retry_join': toolset.join_nodes if toolset.join_nodes else None,
         }
@@ -295,13 +311,13 @@ def setup_container(vm, info, os_kind, arch, init_system, toolset):
                     'bootstrap_expect_value': toolset.install_consul_server,
                 }
             )
-        consul_bin = 'consul64' if arch == 'amd64' else 'consul32'
+        consul_bin = 'consul64' if dist_info.arch == 'amd64' else 'consul32'
         lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'bin'))
         lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'etc'))
         lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'data'))
         lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
         lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
-        local_consul_bin_path = os.path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
+        local_consul_bin_path = path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
         # lxc('exec', vm, 'sync')
         time.sleep(5)
         lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINARY))
@@ -309,7 +325,7 @@ def setup_container(vm, info, os_kind, arch, init_system, toolset):
         render_and_push('consul_params.json.j2', consul_params,
                         vm, consul_service_params['main_config_file'])
         print "starting consul"
-        if init_system == "systemd":
+        if dist_info.init_system == "systemd":
             render_and_push('consul.service.j2', consul_service_params, vm,
                             '/etc/systemd/system/consul.service')
             lxc('exec', vm, 'systemctl', 'start', 'consul')
@@ -321,68 +337,73 @@ def setup_container(vm, info, os_kind, arch, init_system, toolset):
 
 
 def create_container(vm_name, os, release, arch, config_name):
-    if os.path.exists('home/vagrant/.ssh/known_hosts'):
+    if path.exists('home/vagrant/.ssh/known_hosts'):
         ssh_keygen('-f', "/home/vagrant/.ssh/known_hosts", '-R', vm_name)
     image_uri = "images:{os}/{release}/{arch}".format(**vars(args))
-    lxc.launch(image_uri, vm, '-p', config_name)
+    lxc.launch(image_uri, vm_name, '-p', config_name)
 
 
 if __name__ == "__main__":
 
     args = make_arg_parser().parse_args()
-    (os_kind, arch, init_system) = decribe_os(args.os, args.release, args.arch)
+    distrib_info = decribe_os(args.os, args.release, args.arch)  # (os_kind, arch, init_system)
 
     current_vms = list_vm()
     ip_gen = StaticIPGen(PRIVATE_NETWORK, 10, current_vms)
 
-    print "OS: {} arch: {} init system: {}".format(os_kind, arch, init_system)
+    print "Setting up infrastructure"
+    discover_and_setup_base_config(ip_gen)
+    print "End Setting up infrasctucture"
 
-    for vm in args.vm_names:
-        #  If a container mentioned in args already exist we destroy it first and later rebuild it in full
-        if vm in current_vms:
-            print "cleaning [{}]".format(vm)
-            remove_grains(vm)
-            lxc.delete(vm)
-        print "Instantiating core [{}]".format(vm)
-        create_container(vm, os, args.release, arch, 'twoNets')
-        print "Done for core  [{}]".format(vm)
 
-    print "waiting for network state stabilization for {} seconds".format(WAIT_NETWORK_STATE)
-    wait_for_vms(list_vm().keys(), WAIT_NETWORK_STATE)
-
-    time.sleep(WAIT_NETWORK_STATE)
-    print "--" * 100
-    print list_vm()
-    print "--" * 100
-
-    names = []
-
-    for vm, info in list_vm().items():
-        if not args.rebuild_all and vm not in args.vm_names:
-            print "skipping configuration of Container [{}] because rebuild_all=False".format(vm)
-            try:
-                secondary_ip = info.IPV4s.split(',')[1]
-            except IndexError:
-                secondary_ip = None
-        else:
-            if info.state != 'RUNNING':
-                print "not Configuring VM [{}] ({}) because it is stopped and not in the list".format(vm, info)
-                try:
-                    secondary_ip = info.IPV4s.split(',')[1]
-                except IndexError:
-                    secondary_ip = None
-            else:
-                secondary_ip = setup_container(vm, info, os_kind, arch, init_system, vars(args))
-                # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
-        names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
-        if secondary_ip:
-            names.append(dict(ip=secondary_ip, names=["%s.private.lan" % vm]))
-
-    # Rewriting the /etc/hosts file on the HOST (where the lxd daemon sits)
-    # @TODO update hostfile and not full rewrite, we can share ;)
-    tpl = jj_env.get_template('hosts.j2')
-    tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
-    sudo.mv('hosts.tmp', '/etc/hosts')
+    # print "OS: {} arch: {} init system: {}".format(os_kind, arch, init_system)
+    #
+    # for vm in args.vm_names:
+    #     #  If a container mentioned in args already exist we destroy it first and later rebuild it in full
+    #     if vm in current_vms:
+    #         print "cleaning [{}]".format(vm)
+    #         remove_grains(vm)
+    #         lxc.delete(vm)
+    #     print "Instantiating core [{}]".format(vm)
+    #     create_container(vm, os, args.release, arch, 'twoNets')
+    #     print "Done for core  [{}]".format(vm)
+    #
+    # print "waiting for network state stabilization for {} seconds".format(WAIT_NETWORK_STATE)
+    # wait_for_vms(list_vm().keys(), WAIT_NETWORK_STATE)
+    #
+    # time.sleep(WAIT_NETWORK_STATE)
+    # print "--" * 100
+    # print list_vm()
+    # print "--" * 100
+    #
+    # names = []
+    #
+    # for vm, info in list_vm().items():
+    #     if not args.rebuild_all and vm not in args.vm_names:
+    #         print "skipping configuration of Container [{}] because rebuild_all=False".format(vm)
+    #         try:
+    #             secondary_ip = info.IPV4s.split(',')[1]
+    #         except IndexError:
+    #             secondary_ip = None
+    #     else:
+    #         if info.state != 'RUNNING':
+    #             print "not Configuring VM [{}] ({}) because it is stopped and not in the list".format(vm, info)
+    #             try:
+    #                 secondary_ip = info.IPV4s.split(',')[1]
+    #             except IndexError:
+    #                 secondary_ip = None
+    #         else:
+    #             secondary_ip = setup_container(vm, distrib_info, vars(args))
+    #             # Now we prepare the rewrite of the /etc/hosts file on the host to know the VMs.
+    #     names.append(dict(ip=info.mainIPV4, names=["%s.public.lan" % vm, vm]))
+    #     if secondary_ip:
+    #         names.append(dict(ip=secondary_ip, names=["%s.private.lan" % vm]))
+    #
+    # # Rewriting the /etc/hosts file on the HOST (where the lxd daemon sits)
+    # # @TODO update hostfile and not full rewrite, we can share ;)
+    # tpl = jj_env.get_template('hosts.j2')
+    # tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
+    # sudo.mv('hosts.tmp', '/etc/hosts')
 
     print "*" * 100
     print "{}, Done".format(SCRIPTNAME)
