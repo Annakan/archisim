@@ -266,7 +266,7 @@ def decribe_os(os, release, arch):
 def setup_container(vm, con_info, dist_info, toolset):
     print "Configuring VM [{}] ({})".format(vm, con_info)
     install_consul = toolset.install_consul_server or toolset.install_consul
-    # 'secondary_ip' is the final part of the assignated IP, we will build the private network IP based on it
+    # 'secondary_ip' is the final part of the assigned IP, we will build the private network IP based on it
     # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
     con_id = con_info.mainIPV4.split('.')[-1]  # Should we use the 6 last digits to widen our range of addresses?
     secondary_ip = PRIVATE_NETWORK + ".%s" % con_id
