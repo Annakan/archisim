@@ -20,13 +20,16 @@ from collections import namedtuple
 LXC_DNSMASQ_CONF = '/etc/lxc/dnsmasq.conf'
 
 ConInfo = namedtuple('ConInfo', ['name', 'state', 'IPV4s', 'IPV6s', 'ephemeral', 'snapshots', 'mainIPV4', 'mainIPV6'])
-DistInfo = namedtuple('DistInfo', ['os_kind', 'arch', 'init_system'])
+DistInfo = namedtuple('DistInfo', ['os_kind', 'init_system', 'os', 'release', 'arch'])
 
 LOCALDIRNAME, SCRIPTNAME = path.split(path.abspath(sys.argv[0]))
 
 CON_TEMPLATE_DIR = ""
 UID = GUID = 10000
+
+MAIN_NETWORK = "10.0.3."
 PRIVATE_NETWORK = "192.168.0."
+
 
 CNR_CONSUL_PATH = '/opt/consul/'
 CNR_CONSUL_BINARY = join(CNR_CONSUL_PATH, 'bin/consul')
@@ -138,8 +141,8 @@ def wait_for_vms(vmnames, maxwait=30 * 1000):
     started before the end of :maxwait
     """
     start = time.time()
-    if vmnames is basestring:
-        vmnames = list(vmnames)
+    if isinstance(vmnames, basestring):
+        vmnames = (vmnames,)
     # it is the same to wait for one VM after one VM or all at once since the slowest to start will block us
     for vmname in vmnames:
         vmlist = list_vm()
@@ -173,7 +176,7 @@ def update_dhcpd_fixed_ip(names_and_IPs):
         # restart dhcpd / dnsmaq ?
 
 
-def discover_and_setup_base_config(ipgen):
+def discover_and_setup_infra(ipgen):
     """
     Create the base infrastructure of the containers :
     - 3 consul servers
@@ -187,7 +190,7 @@ def discover_and_setup_base_config(ipgen):
     """
     assert isinstance(ipgen, StaticIPGen)
     # container_names = ('consul1', 'consul2', 'consul3', 'saltmaster', 'FreeIPA')
-    container_names = ('consul1', 'consul2')
+    container_names = ('consul1', 'consul2', 'consul3',)
     # let's discover what we have and don't have
     existing = dict()
     to_build = dict()
@@ -220,7 +223,9 @@ def discover_and_setup_base_config(ipgen):
         print "consul container : " + name
         join_nodes = consul_ips - set([cnt.mainIPV4])
         toolset = Namespace(install_consul_server=True, join_nodes=join_nodes)
-        setup_container(cnt, cnt, dist_info, toolset=toolset)
+        setup_container(cnt.name, cnt, dist_info, toolset=toolset)
+
+    update_hostfile()
 
 
 def render_and_push(template, data, vm, target_file_path):
@@ -260,11 +265,11 @@ def describe_os(os, release, arch):
             init_system = 'systemd' if release > 7 else 'init'
         else:
             init_system = None
-    return DistInfo(os_kind, arch, init_system)
+    return DistInfo(os_kind, init_system, os, release, arch)
 
 
-def setup_container(vm, con_info, dist_info, toolset):
-    print "Configuring VM [{}] ({})".format(vm, con_info)
+def setup_container(vm_name, con_info, dist_info, toolset):
+    print "Configuring VM [{}] ({})".format(vm_name, con_info)
     install_consul = toolset.install_consul_server or toolset.install_consul
     # 'secondary_ip' is the final part of the assigned IP, we will build the private network IP based on it
     # At that point of the (re-)creation process the containers have only one IP, the bridged assigned one.
@@ -272,19 +277,20 @@ def setup_container(vm, con_info, dist_info, toolset):
     secondary_ip = PRIVATE_NETWORK + ".%s" % con_id
     print "secondary_ip [{}]".format(con_id)
     print "preparing the VM network interfaces"
-    render_and_push('interfaces.j2', {'con_id': con_id}, vm, '/etc/network/interfaces')
-    lxc('exec', vm, 'sync')
-    time.sleep(5)
+    render_and_push('interfaces.j2', {'con_id': con_id}, vm_name, '/etc/network/interfaces')
+    lxc('exec', vm_name, 'sync')
+    time.sleep(2)
     print "Starting the newly added private interface"
-    lxc('exec', vm, 'ifup', 'eth1')
+    lxc('exec', vm_name, 'ifup', 'eth1')
+    wait_for_vms(vm_name)
     #  Bootstrap.sh contains code executed once for initializations. By default install the openSSH package.
     print "bootstrap"
-    lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm)
-    lxc('exec', vm, '/bin/sh', '/tmp/bootstrap.sh')
+    lxc.file.push('bootstrap.sh', '%s/tmp/bootstrap.sh' % vm_name)
+    lxc('exec', vm_name, '/bin/sh', '/tmp/bootstrap.sh')
     #  And we push a default ssh key on the root of the VM
     print "ssh auth installation"
     lxc.file.push('--uid=100000', '--gid=100000', '/home/vagrant/.ssh/id_ecdsa.pub',
-                  '%s/root/.ssh/authorized_keys' % vm)
+                  '%s/root/.ssh/authorized_keys' % vm_name)
     # installing consul
     if install_consul:
         print "installing consul"
@@ -297,7 +303,7 @@ def setup_container(vm, con_info, dist_info, toolset):
         }
         # join_nodes = toolset.join_nodes.split()
         consul_params = {
-            'node_name': vm,
+            'node_name': vm_name,
             'datacenter': 'AnSSI',
             'bind': con_info.mainIPV4,  # @todo better to use the secondary network probably here
             'consul_data_dir': '/opt/consul/data',
@@ -312,26 +318,26 @@ def setup_container(vm, con_info, dist_info, toolset):
                 }
             )
         consul_bin = 'consul64' if dist_info.arch == 'amd64' else 'consul32'
-        lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'bin'))
-        lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'etc'))
-        lxc('exec', vm, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'data'))
-        lxc('exec', vm, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
-        lxc('exec', vm, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
+        lxc('exec', vm_name, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'bin'))
+        lxc('exec', vm_name, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'etc'))
+        lxc('exec', vm_name, '--', 'mkdir', '-p', join(CNR_CONSUL_PATH, 'data'))
+        lxc('exec', vm_name, '--', 'mkdir', '-p', consul_params['consul_data_dir'])
+        lxc('exec', vm_name, '--', 'mkdir', '-p', consul_service_params['consul_service_dir'])
         local_consul_bin_path = path.join(LOCALDIRNAME, '..', 'consul', consul_bin)
-        # lxc('exec', vm, 'sync')
+        # lxc('exec', vm_name, 'sync')
         time.sleep(5)
-        lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm, CNR_CONSUL_BINARY))
-        lxc('exec', vm, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINARY)
+        lxc.file.push(local_consul_bin_path, '{}/{}'.format(vm_name, CNR_CONSUL_BINARY))
+        lxc('exec', vm_name, '--', '/bin/bash', '-c', '/bin/chmod +x %s' % CNR_CONSUL_BINARY)
         render_and_push('consul_params.json.j2', consul_params,
-                        vm, consul_service_params['main_config_file'])
+                        vm_name, consul_service_params['main_config_file'])
         print "starting consul"
         if dist_info.init_system == "systemd":
-            render_and_push('consul.service.j2', consul_service_params, vm,
+            render_and_push('consul.service.j2', consul_service_params, vm_name,
                             '/etc/systemd/system/consul.service')
-            lxc('exec', vm, 'systemctl', 'start', 'consul')
-        if toolset.os == "ubuntu":
-            dnsmasq_config = '''echo "server=/consul/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul.conf'''
-            lxc('exec', vm, '--', '/bin/bash', '-c', dnsmasq_config)
+            lxc('exec', vm_name, 'systemctl', 'start', 'consul')
+        if dist_info.os == "ubuntu":
+            dnsmasq_config = '''echo "server=/consu l/127.0.0.1#8600" > /etc/dnsmasq.d/10-consul.conf'''
+            lxc('exec', vm_name, '--', '/bin/bash', '-c', dnsmasq_config)
 
         return secondary_ip
 
@@ -341,6 +347,27 @@ def create_container(vm_name, os, release, arch, config_name):
         ssh_keygen('-f', "/home/vagrant/.ssh/known_hosts", '-R', vm_name)
     image_uri = "images:{os}/{release}/{arch}".format(**vars(args))
     lxc.launch(image_uri, vm_name, '-p', config_name)
+    wait_for_vms(vm_name)
+
+
+def build_hostfile_update():
+    names = []
+    vms = list_vm()
+    for vm in vms.values():
+        names.append(dict(ip=vm.mainIPV4, names=["%s.public.lan" % vm.name, vm.name]))
+        try:
+            secondary_ip = vm.IPV4s.split(',')[1]
+            names.append(dict(ip=secondary_ip, names=["%s.private.lan" % vm.name]))
+        except IndexError:
+            pass
+    return names
+
+
+def update_hostfile():
+    names = build_hostfile_update()
+    tpl = jj_env.get_template('hosts.j2')
+    tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
+    sudo.mv('hosts.tmp', '/etc/hosts')
 
 
 if __name__ == "__main__":
@@ -351,9 +378,9 @@ if __name__ == "__main__":
     current_vms = list_vm()
     ip_gen = StaticIPGen(PRIVATE_NETWORK, 10, current_vms)
 
-    print "Setting up infrastructure"
-    discover_and_setup_base_config(ip_gen)
-    print "End Setting up infrasctucture"
+    print "Setting up Infrastructure"
+    discover_and_setup_infra(ip_gen)
+    print "End Setting up Infrastructure"
 
 
     # print "OS: {} arch: {} init system: {}".format(os_kind, arch, init_system)
@@ -401,9 +428,6 @@ if __name__ == "__main__":
     #
     # # Rewriting the /etc/hosts file on the HOST (where the lxd daemon sits)
     # # @TODO update hostfile and not full rewrite, we can share ;)
-    # tpl = jj_env.get_template('hosts.j2')
-    # tpl.stream(names=names).dump(open('hosts.tmp', 'w'))
-    # sudo.mv('hosts.tmp', '/etc/hosts')
 
     print "*" * 100
     print "{}, Done".format(SCRIPTNAME)
