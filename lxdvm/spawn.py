@@ -205,7 +205,7 @@ def discover_and_setup_base_config(ipgen):
     for name in to_build.keys():
         print "creating {}".format(name)
         create_container(name, 'centos', '7', 'amd64', 'twoNets')
-    dist_info = decribe_os('centos', '7', 'amd64')
+    dist_info = describe_os('centos', '7', 'amd64')
 
     wait_for_vms(to_build.keys())
     vms = list_vm()
@@ -240,7 +240,7 @@ def render_and_push(template, data, vm, target_file_path):
         remove_file(tempfile.name)
 
 
-def decribe_os(os, release, arch):
+def describe_os(os, release, arch):
     arch = 'amd64' if args.arch in ['amd64', 'x64'] else 'i386'
     os = os.lower()
     if os in ('redhat', 'centos', 'fedora', 'rh'):
@@ -346,7 +346,7 @@ def create_container(vm_name, os, release, arch, config_name):
 if __name__ == "__main__":
 
     args = make_arg_parser().parse_args()
-    distrib_info = decribe_os(args.os, args.release, args.arch)  # (os_kind, arch, init_system)
+    distrib_info = describe_os(args.os, args.release, args.arch)  # (os_kind, arch, init_system)
 
     current_vms = list_vm()
     ip_gen = StaticIPGen(PRIVATE_NETWORK, 10, current_vms)
